@@ -1,0 +1,27 @@
+**/__pycache__/
+**/*.py[cod]
+**/*.egg-info/
+.eggs/
+
+# Virtual environments and caches
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Not needed in the image
+.git/
+.gitignore
+.dockerignore
+.scratch/
+.claude/
+docs/
+tests/
+scripts/
+
+# Local environment and state (never bake credentials into the image)
+.env
+.env.*
+.agentserver/

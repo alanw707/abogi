@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# Secrets and local settings
+.env
+.env.*
+!.env.example
+.azure/
+
+# Owner data never belongs in the repo
+profile/
+history/

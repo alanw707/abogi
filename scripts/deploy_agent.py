@@ -20,6 +20,15 @@ from azure.ai.projects.models import (
 from azure.identity import DefaultAzureCredential
 
 
+PASSED_THROUGH = (
+    "ABOGI_CALENDAR_API",
+    "ABOGI_TIMEZONE",
+    "ABOGI_REASONING_EFFORT",
+    "ABOGI_GOOGLE_TOKEN_VAULT",
+    "ABOGI_GOOGLE_TOKEN_SECRET",
+)
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         sys.exit(__doc__)
@@ -39,6 +48,8 @@ def main() -> int:
             "PYTHONNOUSERSITE": "1",
             "AZURE_AI_MODEL_DEPLOYMENT_NAME": os.environ["AZURE_AI_MODEL_DEPLOYMENT_NAME"],
             "AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING": "true",
+            # Settings only, never secrets: the Google sign-in lives in Key Vault.
+            **{name: os.environ[name] for name in PASSED_THROUGH if os.environ.get(name)},
         },
     )
     version = project.agents.create_version(agent_name=name, definition=definition)

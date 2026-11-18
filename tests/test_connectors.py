@@ -277,7 +277,7 @@ def test_both_sources_configured_is_a_configuration_error():
         "ABOGI_CALENDAR_MCP_URL": "http://localhost:3000/mcp",
     }
 
-    with pytest.raises(ValueError, match="not both"):
+    with pytest.raises(ValueError, match="only one of"):
         build_calendar_connector(env)
 
 
@@ -305,3 +305,65 @@ async def test_bearer_token_is_sent_on_each_request():
         await client.get("http://example.test/")
 
     assert seen == ["Bearer token-1", "Bearer token-2"]
+
+
+# --- Google sign-in token selection -----------------------------------------
+
+import json as _json
+
+import anyio
+
+import pytest as _pytest
+
+from abogi.connectors import google_auth as _google_auth
+from abogi.connectors.calendar import _direct_token
+
+
+@_pytest.fixture(autouse=True)
+def _no_real_google_config(tmp_path, monkeypatch):
+    """Never read the owner's real ~/.config/abogi in tests."""
+    monkeypatch.setattr(_google_auth, "_CONFIG", tmp_path / "abogi")
+
+
+def _saved_token(path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_json.dumps({
+        "client_id": "id", "client_secret": "s", "refresh_token": "r",
+        "token": "old", "expiry": "2000-01-01T00:00:00Z",
+    }))
+
+
+def test_no_token_and_no_sign_in_means_no_auth():
+    assert _direct_token({}) is None
+
+
+def test_a_fixed_token_wins_over_a_saved_sign_in(tmp_path):
+    _saved_token(tmp_path / "t.json")
+    provider = _direct_token({"ABOGI_CALENDAR_MCP_TOKEN": "fixed", "ABOGI_GOOGLE_TOKEN_FILE": str(tmp_path / "t.json")})
+    assert anyio.run(provider) == "fixed"
+
+
+def test_a_saved_sign_in_refreshes_an_expired_token(tmp_path, monkeypatch):
+    from google.oauth2.credentials import Credentials
+
+    def fake_refresh(self, request):
+        self.token = "fresh"
+        self.expiry = None
+
+    monkeypatch.setattr(Credentials, "refresh", fake_refresh)
+    _saved_token(tmp_path / "t.json")
+    provider = _direct_token({"ABOGI_GOOGLE_TOKEN_FILE": str(tmp_path / "t.json")})
+    assert anyio.run(provider) == "fresh"
+
+
+def test_a_vault_setting_reads_the_sign_in_from_key_vault(monkeypatch):
+    seen = {}
+
+    def fake_vault(url, name):
+        seen.update(url=url, name=name)
+        return "vault-provider"
+
+    monkeypatch.setattr(_google_auth, "google_token_from_vault", fake_vault)
+    provider = _direct_token({"ABOGI_GOOGLE_TOKEN_VAULT": "https://kv.vault.azure.net/"})
+    assert provider == "vault-provider"
+    assert seen == {"url": "https://kv.vault.azure.net/", "name": "google-token"}

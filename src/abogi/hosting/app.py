@@ -17,7 +17,9 @@ import inspect
 import logging
 import os
 from collections.abc import Awaitable, Callable, Iterable, Mapping
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from azure.ai.agentserver.responses import (
     CreateResponse,
@@ -30,7 +32,7 @@ from azure.ai.agentserver.responses import (
 
 from abogi.core.loop import Tool, run_turn
 from abogi.hosting import backend
-from abogi.hosting.instructions import INSTRUCTIONS, with_capabilities
+from abogi.hosting.instructions import INSTRUCTIONS, with_capabilities, with_now
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +122,10 @@ def create_app(
         current = await context.get_input_items()
         items = build_input(history, current)
         tools = await tools_provider()
-        turn_instructions = with_capabilities(instructions, [tool.name for tool in tools])
+        now = datetime.now(ZoneInfo(backend.owner_time_zone()))
+        turn_instructions = with_now(
+            with_capabilities(instructions, [tool.name for tool in tools]), now
+        )
         answer = await run_turn(
             client,
             model or backend.model_name(),

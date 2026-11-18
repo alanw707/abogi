@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from typing import Any
 
 import anyio
 
@@ -75,15 +76,18 @@ def static_token(token: str) -> TokenProvider:
     return provider
 
 
-def build_calendar_connector(env: Mapping[str, str]) -> McpConnector | None:
+def build_calendar_connector(env: Mapping[str, str]) -> Any:
     """The configured calendar connector, or None when none is configured."""
     toolbox = env.get("ABOGI_CALENDAR_TOOLBOX", "").strip()
     url = env.get("ABOGI_CALENDAR_MCP_URL", "").strip()
+    api = env.get("ABOGI_CALENDAR_API", "").strip().lower()
 
-    if toolbox and url:
+    if sum(map(bool, (toolbox, url, api))) > 1:
         raise ValueError(
-            "Set ABOGI_CALENDAR_TOOLBOX or ABOGI_CALENDAR_MCP_URL, not both."
+            "Set only one of ABOGI_CALENDAR_API, ABOGI_CALENDAR_TOOLBOX or ABOGI_CALENDAR_MCP_URL."
         )
+    if api:
+        return _google_api_connector(env, api)
     if toolbox:
         endpoint = env.get("FOUNDRY_PROJECT_ENDPOINT", "").strip()
         if not endpoint:
@@ -92,8 +96,35 @@ def build_calendar_connector(env: Mapping[str, str]) -> McpConnector | None:
             "calendar", toolbox_url(endpoint, toolbox), foundry_token(), allow=is_read_only
         )
     if url:
-        token = env.get("ABOGI_CALENDAR_MCP_TOKEN", "").strip()
-        return McpConnector.over_http(
-            "calendar", url, static_token(token) if token else None, allow=is_read_only
-        )
+        return McpConnector.over_http("calendar", url, _direct_token(env), allow=is_read_only)
     return None
+
+
+def _google_api_connector(env: Mapping[str, str], api: str) -> Any:
+    """The direct Google Calendar API connector (ADR 0003)."""
+    if api != "google":
+        raise ValueError(f"ABOGI_CALENDAR_API must be 'google', not {api!r}.")
+    from abogi.connectors.google_calendar import GoogleCalendarConnector, http_fetch
+
+    token = _direct_token(env)
+    if token is None:
+        raise ValueError(
+            "ABOGI_CALENDAR_API=google needs a Google sign-in: "
+            "run `uv run python -m abogi.connectors.google_auth`."
+        )
+    return GoogleCalendarConnector(http_fetch(token))
+
+
+def _direct_token(env: Mapping[str, str]) -> TokenProvider | None:
+    """A fixed token if one is set, else the owner's saved Google sign-in, else none."""
+    token = env.get("ABOGI_CALENDAR_MCP_TOKEN", "").strip()
+    if token:
+        return static_token(token)
+    from abogi.connectors.google_auth import google_token, google_token_from_vault, token_file
+
+    vault = env.get("ABOGI_GOOGLE_TOKEN_VAULT", "").strip()
+    if vault:
+        name = env.get("ABOGI_GOOGLE_TOKEN_SECRET", "").strip() or "google-token"
+        return google_token_from_vault(vault, name)
+    saved = token_file(env)
+    return google_token(saved) if saved.exists() else None

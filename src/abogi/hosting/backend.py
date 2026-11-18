@@ -34,6 +34,19 @@ def backend_name(env: Mapping[str, str] | None = None) -> str:
     return name
 
 
+def owner_time_zone(env: Mapping[str, str] | None = None) -> str:
+    """ABOGI_TIMEZONE: the owner's IANA time zone, such as America/Los_Angeles. Default UTC."""
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    env = os.environ if env is None else env
+    zone = env.get("ABOGI_TIMEZONE", "").strip() or "UTC"
+    try:
+        ZoneInfo(zone)
+    except (ZoneInfoNotFoundError, ValueError) as error:
+        raise RuntimeError(f"ABOGI_TIMEZONE is not a known time zone: {zone!r}.") from error
+    return zone
+
+
 def model_name(env: Mapping[str, str] | None = None) -> str:
     env = os.environ if env is None else env
     model = env.get("AZURE_AI_MODEL_DEPLOYMENT_NAME", "").strip()

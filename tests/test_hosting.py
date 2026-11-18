@@ -267,3 +267,24 @@ def test_reasoning_effort_setting():
     assert reasoning_effort({"ABOGI_REASONING_EFFORT": "default"}) is None
     with pytest.raises(RuntimeError):
         reasoning_effort({"ABOGI_REASONING_EFFORT": "fast"})
+
+
+def test_turn_instructions_carry_the_owners_local_time():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from abogi.hosting.instructions import with_now
+
+    now = datetime(2026, 11, 18, 14, 5, tzinfo=ZoneInfo("America/Los_Angeles"))
+    assert "Wednesday 18 November 2026, 14:05 (America/Los_Angeles)" in with_now("x", now)
+
+
+def test_owner_time_zone_setting():
+    import pytest
+
+    from abogi.hosting.backend import owner_time_zone
+
+    assert owner_time_zone({}) == "UTC"
+    assert owner_time_zone({"ABOGI_TIMEZONE": "Asia/Taipei"}) == "Asia/Taipei"
+    with pytest.raises(RuntimeError):
+        owner_time_zone({"ABOGI_TIMEZONE": "Mars/Base"})

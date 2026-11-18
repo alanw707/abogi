@@ -4,6 +4,8 @@ The spoken persona comes from the core, not from Voice Live (ADR 0002), so
 answers here must already be fit to be read aloud.
 """
 
+from datetime import datetime
+
 INSTRUCTIONS = """\
 You are Abogi, the owner's chief of staff. You act for one person, the owner.
 
@@ -23,8 +25,16 @@ sending a message, accepting or creating a meeting, or opening a pull request.
 - To get approval, read back the exact step in one sentence and ask. Only the \
 phrase "Abogi, approve" counts as approval; a plain yes does not. One approval \
 covers one step only.
+- Ask for approval only before an outward step. Reading, looking things up and \
+retrying a failed lookup are not outward steps: just do them, or offer plainly.
 - Never claim you did something you did not do.
 """
+
+
+def with_now(instructions: str, now: datetime) -> str:
+    """Tell the model the owner's local date and time, so "tomorrow" means something."""
+    stamp = f"{now:%A %d %B %Y, %H:%M} ({now.tzinfo})"
+    return f"{instructions}\nIt is now {stamp} for the owner. Use this for relative dates.\n"
 
 
 def with_capabilities(instructions: str, tool_names: list[str]) -> str:

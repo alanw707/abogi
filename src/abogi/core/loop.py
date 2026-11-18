@@ -82,6 +82,7 @@ async def run_turn(
     items: list[dict[str, Any]],
     tools: list[Tool],
     max_steps: int = 12,
+    reasoning_effort: str | None = None,
 ) -> str:
     """Run one owner turn to completion and return the spoken-length answer.
 
@@ -92,11 +93,13 @@ async def run_turn(
     schemas = [tool.schema() for tool in tools]
     past_calls: list[ToolCall] = []
     step = 0
+    # Sent only when set, so models that reject the parameter still work.
+    options = {"reasoning": {"effort": reasoning_effort}} if reasoning_effort else {}
 
     while True:
         step += 1
         response = await client.responses.create(
-            model=model, instructions=instructions, input=items, tools=schemas
+            model=model, instructions=instructions, input=items, tools=schemas, **options
         )
         items.extend(item.model_dump(exclude_none=True) for item in response.output)
         calls = [
@@ -116,7 +119,7 @@ async def run_turn(
                 items.append(_tool_output(call, "Not run: the step limit was reached."))
             items.append({"role": "user", "content": WRAP_UP_PROMPT})
             final = await client.responses.create(
-                model=model, instructions=instructions, input=items
+                model=model, instructions=instructions, input=items, **options
             )
             items.extend(item.model_dump(exclude_none=True) for item in final.output)
             return final.output_text

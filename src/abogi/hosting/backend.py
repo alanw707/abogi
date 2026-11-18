@@ -42,6 +42,26 @@ def model_name(env: Mapping[str, str] | None = None) -> str:
     return model
 
 
+REASONING_EFFORTS = {"minimal", "low", "medium", "high"}
+
+
+def reasoning_effort(env: Mapping[str, str] | None = None) -> str | None:
+    """ABOGI_REASONING_EFFORT: one of REASONING_EFFORTS, or "default" to send none.
+
+    Defaults to "low": measured on gpt-5-mini it is as fast as the model default
+    while capping thinking on harder turns. "default" is for models that reject
+    the parameter (some local models).
+    """
+    env = os.environ if env is None else env
+    effort = env.get("ABOGI_REASONING_EFFORT", "low").strip().lower() or "low"
+    if effort == "default":
+        return None
+    if effort not in REASONING_EFFORTS:
+        allowed = ", ".join(sorted(REASONING_EFFORTS))
+        raise RuntimeError(f"ABOGI_REASONING_EFFORT must be one of {allowed} or default, not {effort!r}.")
+    return effort
+
+
 def make_client(env: Mapping[str, str] | None = None) -> Any:
     """Return an async OpenAI-compatible client for the selected backend."""
     env = os.environ if env is None else env

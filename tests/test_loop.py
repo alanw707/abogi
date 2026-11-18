@@ -75,3 +75,12 @@ def test_identical_repeated_calls_wrap_up_early():
     assert decide(LoopState(3, 12, [same], [same, same])) is Action.WRAP_UP
     changed = ToolCall("c2", "echo", "{\"word\": \"x\"}")
     assert decide(LoopState(3, 12, [changed], [same, same])) is Action.RUN_TOOLS
+
+
+async def test_reasoning_effort_is_sent_only_when_set():
+    client = FakeClient(text("ok"))
+    await run_turn(client, "m", "be brief", [], [ECHO], reasoning_effort="low")
+    assert client.requests[-1]["reasoning"] == {"effort": "low"}
+    client = FakeClient(text("ok"))
+    await run_turn(client, "m", "be brief", [], [ECHO])
+    assert "reasoning" not in client.requests[-1]

@@ -244,3 +244,26 @@ def test_model_name_comes_from_deployment_env():
     assert backend.model_name({"AZURE_AI_MODEL_DEPLOYMENT_NAME": "gpt-x"}) == "gpt-x"
     with pytest.raises(RuntimeError, match="AZURE_AI_MODEL_DEPLOYMENT_NAME"):
         backend.model_name({})
+
+
+def test_instructions_name_only_the_connected_tools():
+    from abogi.hosting.instructions import INSTRUCTIONS, with_capabilities
+
+    none = with_capabilities(INSTRUCTIONS, [])
+    assert "no tools connected" in none
+    some = with_capabilities(INSTRUCTIONS, ["list_events", "get_event"])
+    assert "list_events, get_event" in some
+    assert "no tools connected" not in some
+    assert "Abogi, approve" in INSTRUCTIONS
+
+
+def test_reasoning_effort_setting():
+    import pytest
+
+    from abogi.hosting.backend import reasoning_effort
+
+    assert reasoning_effort({}) == "low"
+    assert reasoning_effort({"ABOGI_REASONING_EFFORT": "Minimal"}) == "minimal"
+    assert reasoning_effort({"ABOGI_REASONING_EFFORT": "default"}) is None
+    with pytest.raises(RuntimeError):
+        reasoning_effort({"ABOGI_REASONING_EFFORT": "fast"})

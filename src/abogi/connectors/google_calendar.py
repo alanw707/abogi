@@ -54,6 +54,7 @@ class GoogleCalendarConnector:
 
     def __init__(self, fetch: Fetch) -> None:
         self._fetch = fetch
+        self._zones: dict[str, str] = {}  # calendar time zones rarely change; one lookup each
 
     async def tools(self) -> list[Tool]:
         return [
@@ -142,8 +143,10 @@ class GoogleCalendarConnector:
     async def _time_zone(self, calendar_id: str) -> str:
         # calendarList, not calendars.get: the read-only scopes Abogi asks for
         # (calendarlist.readonly, events.readonly) do not cover calendars.get.
-        data = await self._fetch(f"/users/me/calendarList/{_q(calendar_id)}", {})
-        return data.get("timeZone", "UTC")
+        if calendar_id not in self._zones:
+            data = await self._fetch(f"/users/me/calendarList/{_q(calendar_id)}", {})
+            self._zones[calendar_id] = data.get("timeZone", "UTC")
+        return self._zones[calendar_id]
 
 
 def _q(segment: str) -> str:

@@ -77,3 +77,12 @@ def test_direct_api_needs_a_sign_in(tmp_path):
 def test_only_one_calendar_source_may_be_set():
     with pytest.raises(ValueError, match="only one of"):
         build_calendar_connector({"ABOGI_CALENDAR_API": "google", "ABOGI_CALENDAR_MCP_URL": "http://x"})
+
+
+def test_the_calendar_time_zone_is_looked_up_once():
+    fetch, calls = fake_api()
+    connector = GoogleCalendarConnector(fetch)
+    run(connector, "list_events", start_date="2026-11-19")
+    run(connector, "list_events", start_date="2026-11-20")
+    lookups = [path for path, _ in calls if path.startswith("/users/me/calendarList/")]
+    assert lookups == ["/users/me/calendarList/primary"]

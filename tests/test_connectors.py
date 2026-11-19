@@ -367,3 +367,23 @@ def test_a_vault_setting_reads_the_sign_in_from_key_vault(monkeypatch):
     provider = _direct_token({"ABOGI_GOOGLE_TOKEN_VAULT": "https://kv.vault.azure.net/"})
     assert provider == "vault-provider"
     assert seen == {"url": "https://kv.vault.azure.net/", "name": "google-token"}
+
+
+def test_a_rejected_refresh_token_is_reloaded_once(monkeypatch):
+    from google.auth.exceptions import RefreshError
+    from google.oauth2.credentials import Credentials
+
+    loads = []
+
+    def load():
+        loads.append(1)
+        return {"client_id": "id", "client_secret": "s", "refresh_token": f"r{len(loads)}"}
+
+    def fake_refresh(self, request):
+        if self.refresh_token == "r1":
+            raise RefreshError("expired")
+        self.token, self.expiry = "fresh", None
+
+    monkeypatch.setattr(Credentials, "refresh", fake_refresh)
+    assert anyio.run(_google_auth._refreshing(load)) == "fresh"
+    assert len(loads) == 2

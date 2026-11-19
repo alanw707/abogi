@@ -72,11 +72,21 @@ def _refreshing(load: Callable[[], dict]) -> TokenProvider:
 
     credentials: list[Credentials] = []
 
+    from google.auth.exceptions import RefreshError
+
+    def reload() -> Credentials:
+        credentials[:] = [Credentials.from_authorized_user_info(load(), SCOPES)]
+        return credentials[0]
+
     def fresh() -> str:
-        if not credentials:
-            credentials.append(Credentials.from_authorized_user_info(load(), SCOPES))
-        current = credentials[0]
-        if not current.valid:
+        current = credentials[0] if credentials else reload()
+        if current.valid:
+            return current.token
+        try:
+            current.refresh(Request())
+        except RefreshError:
+            # The owner may have signed in again since we loaded: reload once and retry.
+            current = reload()
             current.refresh(Request())
         return current.token
 
@@ -147,5 +157,34 @@ def sign_in(env: Mapping[str, str] | None = None) -> Path:
     return target
 
 
+def upload_to_vault(path: Path, vault_url: str, secret_name: str = "google-token") -> None:
+    """Store the saved sign-in in Key Vault for the hosted agent, without printing it."""
+    from azure.identity import DefaultAzureCredential
+    from azure.keyvault.secrets import SecretClient
+
+    client = SecretClient(vault_url=vault_url, credential=DefaultAzureCredential())
+    client.set_secret(secret_name, path.read_text(), content_type="application/json")
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Sign in; with ABOGI_GOOGLE_TOKEN_VAULT set (or --vault URL), also update Key Vault.
+
+    The hosted agent re-reads the vault copy when Google rejects its cached
+    refresh token, so renewing needs no redeploy.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="python -m abogi.connectors.google_auth")
+    parser.add_argument("--vault", default=os.environ.get("ABOGI_GOOGLE_TOKEN_VAULT", ""))
+    parser.add_argument("--secret", default=os.environ.get("ABOGI_GOOGLE_TOKEN_SECRET") or "google-token")
+    args = parser.parse_args(argv)
+
+    saved = sign_in()
+    print(f"Saved Google token to {saved}")
+    if args.vault:
+        upload_to_vault(saved, args.vault, args.secret)
+        print(f"Updated secret {args.secret} in {args.vault}")
+
+
 if __name__ == "__main__":
-    print(f"Saved Google token to {sign_in()}")
+    main()

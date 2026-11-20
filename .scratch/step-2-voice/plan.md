@@ -61,6 +61,7 @@ Spike: `scripts/voice_spike.py` (text turns over one Voice Live connection, no m
 Python tray app (Windows, not WSL): hold a hotkey to talk, release to send; plays the reply; interrupt by pressing again. Signs in once with Azure at start and keeps the token (removes the 4.3 s CLI cost per question).
 
 ### 4. Spoken-length answers — needs-triage
+First real voice session (20 Nov 2026, tray client) found: Abogi read tool names aloud ("list_calendars, list_events, get_event") when asked what it can do; it claimed to be "GPT-4 family with knowledge to June 2024" (it runs gpt-5-mini and should not guess); calendar times mixed "6:45–7:45" with "2:35–2:45 PM" and earlier "16:00". Fixed in hosted agent v6: the instructions forbid saying tool names and require 12-hour times, `with_model()` states the deployment so the model does not guess, and the calendar tool now returns "2:35 PM" itself. Checked through Voice Live: plain-words abilities, "gpt-5-mini model deployment in Microsoft Foundry", and every time with AM/PM. Still worth adding evaluation cases.
 Answers already avoid markdown, but `minimal` showed how easily lists come back line-broken. Add a few evaluation cases that check calendar answers read naturally aloud (times as "8:10", no bullets) before tuning further.
 
 ### 5. Trace the calendar calls — needs-triage

@@ -58,9 +58,19 @@ def test_events_are_summarised_in_local_time_and_cancelled_ones_dropped():
     ]
     fetch, _ = fake_api(events)
     answer = run(GoogleCalendarConnector(fetch), "list_events", start_date="2026-11-19")
-    assert "Thu 19 Nov 09:00-09:15: Standup at Zoom (id a)" in answer
+    assert "Thu 19 Nov 9:00 AM-9:15 AM: Standup at Zoom (id a)" in answer
     assert "2026-11-19 all day: Holiday (id b)" in answer
     assert "Gone" not in answer
+
+
+def test_spoken_clock_is_twelve_hour():
+    from datetime import datetime
+
+    from abogi.connectors.google_calendar import spoken_clock
+
+    assert spoken_clock(datetime(2026, 11, 19, 14, 35)) == "2:35 PM"
+    assert spoken_clock(datetime(2026, 11, 19, 0, 5)) == "12:05 AM"
+    assert spoken_clock(datetime(2026, 11, 19, 12, 0)) == "12:00 PM"
 
 
 def test_ids_from_the_model_cannot_change_the_api_path():

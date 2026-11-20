@@ -51,6 +51,16 @@ uv run abogi --agent abogi "what's on my calendar tomorrow?"     # ask the hoste
 uv run --env-file .env python scripts/deploy_agent.py <image>    # new hosted agent version
 ```
 
+### Voice (Windows tray, push-to-talk)
+
+Needs `uv` on Windows (`winget install astral-sh.uv`), `ABOGI_TENANT_ID` in `.env`, and `Cognitive Services User` plus `Foundry User` on the Foundry resource. From Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File <repo>\scripts\abogi-tray.ps1   # e.g. \\wsl.localhost\<distro>\home\<you>\projects\abogi
+```
+
+The first run prints a code to enter at microsoft.com/devicelogin to sign in to Azure; later runs are silent. Hold F9 (`ABOGI_VOICE_KEY`) and speak, release to send, press again to interrupt. The tray dot is grey idle, blue warming, red listening, amber thinking, green speaking, black offline. Optional: `ABOGI_VOICE` (an Azure voice name) and `ABOGI_AGENT_NAME`.
+
 If Azure sign-in times out, an old `az` in `~/.local/bin` is shadowing `/usr/bin/az`; put `/usr/bin` first on `PATH`.
 
 ## Licence

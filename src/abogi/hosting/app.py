@@ -32,7 +32,7 @@ from azure.ai.agentserver.responses import (
 
 from abogi.core.loop import Tool, run_turn
 from abogi.hosting import backend
-from abogi.hosting.instructions import INSTRUCTIONS, with_capabilities, with_now
+from abogi.hosting.instructions import INSTRUCTIONS, with_capabilities, with_model, with_now
 
 logger = logging.getLogger(__name__)
 
@@ -123,12 +123,14 @@ def create_app(
         items = build_input(history, current)
         tools = await tools_provider()
         now = datetime.now(ZoneInfo(backend.owner_time_zone()))
+        model_name = model or backend.model_name()
         turn_instructions = with_now(
-            with_capabilities(instructions, [tool.name for tool in tools]), now
+            with_model(with_capabilities(instructions, [tool.name for tool in tools]), model_name),
+            now,
         )
         answer = await run_turn(
             client,
-            model or backend.model_name(),
+            model_name,
             turn_instructions,
             items,
             tools,

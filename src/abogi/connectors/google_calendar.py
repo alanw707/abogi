@@ -159,6 +159,16 @@ def _q(segment: str) -> str:
     return quote(str(segment), safe="")
 
 
+def spoken_clock(moment: datetime) -> str:
+    """12-hour time as it is said aloud: "2:35 PM", "12:05 AM".
+
+    The tool hands the model times in the form it should speak, so the model
+    does not convert 24-hour times itself (it did so unevenly).
+    """
+    hour = moment.hour % 12 or 12
+    return f"{hour}:{moment.minute:02d} {'AM' if moment.hour < 12 else 'PM'}"
+
+
 def _summary(event: dict[str, Any], zone: ZoneInfo) -> str:
     start, end = event.get("start", {}), event.get("end", {})
     if "date" in start:
@@ -166,6 +176,6 @@ def _summary(event: dict[str, Any], zone: ZoneInfo) -> str:
     else:
         begin = datetime.fromisoformat(start["dateTime"]).astimezone(zone)
         finish = datetime.fromisoformat(end["dateTime"]).astimezone(zone)
-        when = f"{begin:%a %d %b %H:%M}-{finish:%H:%M}"
+        when = f"{begin:%a %d %b} {spoken_clock(begin)}-{spoken_clock(finish)}"
     where = f" at {event['location']}" if event.get("location") else ""
     return f"{when}: {event.get('summary', '(no title)')}{where} (id {event['id']})"

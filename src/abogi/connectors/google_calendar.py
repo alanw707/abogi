@@ -56,6 +56,11 @@ class GoogleCalendarConnector:
         self._fetch = fetch
         self._zones: dict[str, str] = {}  # calendar time zones rarely change; one lookup each
 
+    async def prepare(self) -> None:
+        """Do the slow first-use work early: load and refresh the Google sign-in
+        (from Key Vault when hosted) and look up the primary calendar's time zone."""
+        await self._time_zone("primary")
+
     async def tools(self) -> list[Tool]:
         return [
             Tool(

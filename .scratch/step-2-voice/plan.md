@@ -59,13 +59,22 @@ Spike: `scripts/voice_spike.py` (text turns over one Voice Live connection, no m
 
 ### 3. Windows tray client, push-to-talk — ready-for-agent
 Python tray app (Windows, not WSL): hold a hotkey to talk, release to send; plays the reply; interrupt by pressing again. Signs in once with Azure at start and keeps the token (removes the 4.3 s CLI cost per question).
+Done: push-to-talk on F9 (tested by voice 20 Nov 2026), and an opt-in hands-free mode (tray menu toggle or `ABOGI_VOICE_MODE=hands-free`) using `azure_semantic_vad`, tested by voice 20 Nov 2026. Voice Live rules found: server echo cancellation is rejected unless turn detection is on, and turn detection cannot be switched on mid-session, so the toggle reconnects with the same `conversation_id`.
 
 ### 4. Spoken-length answers — needs-triage
 First real voice session (20 Nov 2026, tray client) found: Abogi read tool names aloud ("list_calendars, list_events, get_event") when asked what it can do; it claimed to be "GPT-4 family with knowledge to June 2024" (it runs gpt-5-mini and should not guess); calendar times mixed "6:45–7:45" with "2:35–2:45 PM" and earlier "16:00". Fixed in hosted agent v6: the instructions forbid saying tool names and require 12-hour times, `with_model()` states the deployment so the model does not guess, and the calendar tool now returns "2:35 PM" itself. Checked through Voice Live: plain-words abilities, "gpt-5-mini model deployment in Microsoft Foundry", and every time with AM/PM. Still worth adding evaluation cases.
 Answers already avoid markdown, but `minimal` showed how easily lists come back line-broken. Add a few evaluation cases that check calendar answers read naturally aloud (times as "8:10", no bullets) before tuning further.
 
-### 5. Trace the calendar calls — needs-triage
+### 5. Trace the calendar calls — done
+Hosted agent v10: every tool run is an `execute_tool <name>` span (GenAI conventions) and outgoing httpx calls are traced, all inside the turn's `invoke_agent` trace. First reading (21 Nov 2026, Monday's events): tool 249 ms, of which Google 240 ms; the two model calls around it took ~1.1 s and ~0.9 s. So calendar turns are slow on model calls, not on Google.
+Original note:
 Google Calendar HTTP calls are not in the trace yet; add spans so a slow turn shows whether Google or the model was slow.
 
-### 6. Reply-time budget — needs-info
+### 6. Reply-time budget — done for step 2
+Owner's call (20 Nov 2026): overall speed is good; do what is cheap. Done in hosted agent v7-v9:
+- The agent streams its answer (`stream_turn` in the core loop, returned through `TextResponse`), so Voice Live speaks while the text is still being written. A three-sentence answer: first audio 2.3 s, text done 4.7 s (before: audio waited for the whole answer, ~3 s+).
+- Before a lookup the agent says a short lead-in ("Let me check your calendar.") once, and stops without offering extra actions. Model alone: first words 1.3-2.2 s instead of 5.5-8.8 s.
+- The loop sends a space as soon as a tool-calling step ends, so the lead-in sentence is closed before the tools run.
+- Through Voice Live, calendar questions now start speaking at 4.0-5.2 s (before 4.9-6.6 s). Timeline: lead-in text reaches Voice Live at ~2.5 s, but audio only starts when the answer text follows (~4.5 s): Voice Live holds a short first sentence back. No documented setting for this was found. Options if it matters later: a local "thinking" sound in the tray client, or a speech-to-speech model for the lead-in.
+Original note:
 Decide what "fast enough" is for push-to-talk (for example, first audio within 3 s of release on a warm conversation). Voice Live can stream audio as text arrives, so the agent should stream its answer instead of returning it whole (`TextResponse` supports streaming).

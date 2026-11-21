@@ -2,10 +2,11 @@
 
 Serves the Responses protocol on port 8088 (or ``PORT``). Each request is one
 owner turn: the conversation so far and the new input become Responses input
-items, the core loop runs to completion, and its text answer is returned.
+items, the core loop runs, and its answer text is streamed back as the model writes it.
 
 Tracing is configured by agentserver-core when
-``APPLICATIONINSIGHTS_CONNECTION_STRING`` is set. Model-call spans also need
+``APPLICATIONINSIGHTS_CONNECTION_STRING`` is set; tool runs and outgoing
+HTTP calls (Google Calendar) get their own spans. Model-call spans also need
 ``AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING=true``.
 """
 
@@ -30,9 +31,9 @@ from azure.ai.agentserver.responses import (
     TextResponse,
 )
 
-from abogi.core.loop import Tool, run_turn
+from abogi.core.loop import Tool, stream_turn
 from abogi.hosting import backend
-from abogi.hosting.instructions import INSTRUCTIONS, with_capabilities, with_now
+from abogi.hosting.instructions import INSTRUCTIONS, with_capabilities, with_model, with_now
 
 logger = logging.getLogger(__name__)
 
@@ -123,12 +124,15 @@ def create_app(
         items = build_input(history, current)
         tools = await tools_provider()
         now = datetime.now(ZoneInfo(backend.owner_time_zone()))
+        model_name = model or backend.model_name()
         turn_instructions = with_now(
-            with_capabilities(instructions, [tool.name for tool in tools]), now
+            with_model(with_capabilities(instructions, [tool.name for tool in tools]), model_name),
+            now,
         )
-        answer = await run_turn(
+        # Streamed, so Voice Live can start speaking on the first words.
+        answer = stream_turn(
             client,
-            model or backend.model_name(),
+            model_name,
             turn_instructions,
             items,
             tools,
@@ -137,6 +141,15 @@ def create_app(
         return TextResponse(context, request, text=answer)
 
     return app
+
+
+def _instrument_http_calls() -> None:
+    """Trace outgoing httpx requests, such as the Google Calendar API calls."""
+    if not os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING"):
+        return
+    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+
+    HTTPXClientInstrumentor().instrument()
 
 
 def _instrument_model_calls() -> None:
@@ -150,6 +163,7 @@ def _instrument_model_calls() -> None:
 def main() -> None:
     logging.basicConfig(level=os.environ.get("ABOGI_LOG_LEVEL", "INFO"))
     _instrument_model_calls()
+    _instrument_http_calls()
     model = backend.model_name()  # fail at startup, not on the first request
     logger.info("Abogi starting: backend=%s model=%s", backend.backend_name(), model)
     create_app(model=model, tools_provider=reuse_once_loaded(default_tools_provider)).run()

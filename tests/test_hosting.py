@@ -253,8 +253,18 @@ def test_instructions_name_only_the_connected_tools():
     assert "no tools connected" in none
     some = with_capabilities(INSTRUCTIONS, ["list_events", "get_event"])
     assert "list_events, get_event" in some
+    assert "never say these names aloud" in some
     assert "no tools connected" not in some
     assert "Abogi, approve" in INSTRUCTIONS
+    assert "AM or PM" in INSTRUCTIONS
+
+
+def test_instructions_state_the_model_so_it_never_guesses():
+    from abogi.hosting.instructions import with_model
+
+    text = with_model("x", "gpt-5-mini")
+    assert "gpt-5-mini" in text
+    assert "do not guess" in text
 
 
 def test_reasoning_effort_setting():
@@ -276,7 +286,7 @@ def test_turn_instructions_carry_the_owners_local_time():
     from abogi.hosting.instructions import with_now
 
     now = datetime(2026, 11, 18, 14, 5, tzinfo=ZoneInfo("America/Los_Angeles"))
-    assert "Wednesday 18 November 2026, 14:05 (America/Los_Angeles)" in with_now("x", now)
+    assert "Wednesday 18 November 2026, 2:05 PM (America/Los_Angeles)" in with_now("x", now)
 
 
 def test_owner_time_zone_setting():

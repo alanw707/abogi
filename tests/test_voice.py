@@ -194,6 +194,95 @@ async def test_goes_cold_after_idle_and_rewarms(parts):
     assert await session.warm() is True
 
 
+def test_hands_free_config_lets_the_server_detect_turns():
+    from abogi.channels.voice import turn_detection
+
+    assert turn_detection(False) is None
+    detection = session_config(hands_free=True)["turn_detection"]
+    assert detection["type"] == "azure_semantic_vad"
+    assert detection["create_response"] and detection["interrupt_response"]
+
+
+def speech(kind):
+    return NS(type=f"input_audio_buffer.speech_{kind}")
+
+
+@pytest.fixture
+def hands_free(parts):
+    session = parts[0]
+    session.hands_free = True
+    return parts
+
+
+async def test_hands_free_streams_audio_without_a_key_and_plays_the_reply(hands_free):
+    session, connection, player, clock, states = hands_free
+    await warmed(session, clock)
+    await session.audio(b"room")
+    assert connection.names() == ["append"]
+
+    await session.handle(speech("started"))
+    await session.handle(speech("stopped"))
+    assert "response.create" not in connection.names()  # the server creates it
+    await session.handle(created("r1"))
+    await session.handle(audio("r1", b"hi"))
+    await session.handle(done("r1"))
+    assert bytes(player.played) == b"hi"
+    assert states[-4:] == [LISTENING, THINKING, SPEAKING, IDLE]
+
+
+async def test_hands_free_talking_over_abogi_drops_its_audio_without_a_second_cancel(hands_free):
+    session, connection, player, clock, _ = hands_free
+    await warmed(session, clock)
+    await session.handle(speech("started"))
+    await session.handle(speech("stopped"))
+    await session.handle(created("r1"))
+    await session.handle(audio("r1", b"a"))
+
+    await session.handle(speech("started"))  # owner interrupts
+    assert player.flushes == 1
+    assert "response.cancel" not in connection.names()  # interrupt_response does it
+    await session.handle(audio("r1", b"late"))
+    await session.handle(done("r1"))
+    assert bytes(player.played) == b"a"
+    assert session.state == LISTENING
+
+
+async def test_hands_free_key_only_stops_abogi(hands_free):
+    session, connection, _, clock, _ = hands_free
+    await warmed(session, clock)
+    await session.key_down()
+    await session.key_up()
+    assert connection.sent == []  # nothing to stop
+    await session.handle(speech("started"))
+    await session.handle(speech("stopped"))
+    await session.handle(created("r1"))
+    await session.key_down()
+    assert ("response.cancel", {"response_id": "r1"}) in connection.sent
+    assert session.state == IDLE
+
+
+async def test_no_mic_audio_is_sent_during_a_warm_up(hands_free):
+    session, connection, _, _, _ = hands_free
+    await session.warm()
+    connection.sent.clear()
+    await session.audio(b"room")
+    assert connection.sent == []
+
+
+async def test_a_reconnected_session_inherits_warmth(parts):
+    _, connection, player, clock, _ = parts
+    clock.now = 500.0
+    session = VoiceSession(connection, player, clock=clock, last_turn=450.0)
+    assert not session.is_cold()
+    assert await session.warm() is False
+
+
+def test_echo_cancellation_only_with_hands_free():
+    # Voice Live rejects server echo cancellation when turn detection is off.
+    assert session_config()["input_audio_echo_cancellation"] is None
+    assert session_config(hands_free=True)["input_audio_echo_cancellation"]
+
+
 async def test_an_error_returns_to_idle(parts):
     session, _, _, clock, _ = parts
     await warmed(session, clock)

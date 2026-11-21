@@ -6,7 +6,10 @@ Hold the push-to-talk key (default F9, or ABOGI_VOICE_KEY) and speak; release
 to send. Press again while Abogi talks to interrupt. A bar pops up at the
 bottom of the screen while a turn is going on, and the tray icon shows the
 state: grey idle, blue warming, red listening, amber thinking, green speaking,
-black offline. Right-click the icon to quit.
+black offline. Right-click the icon to quit or to turn on "Hands-free
+listening": then the microphone streams all the time, Voice Live decides
+when a turn starts and ends, and the key only stops Abogi mid-answer.
+Push-to-talk is the default; ABOGI_VOICE_MODE=hands-free starts hands-free.
 
 Runs on Windows, not WSL: WSL sees neither global keys nor the tray.
 
@@ -258,7 +261,15 @@ class Overlay:
 
 
 class TrayClient:
-    def __init__(self, endpoint: str, agent: str, key_name: str, voice: str, tenant_id: str | None):
+    def __init__(
+        self,
+        endpoint: str,
+        agent: str,
+        key_name: str,
+        voice: str,
+        tenant_id: str | None,
+        hands_free: bool = False,
+    ):
         from urllib.parse import urlsplit
 
         parts = urlsplit(endpoint)
@@ -273,7 +284,26 @@ class TrayClient:
         self._icon: Any = None
         self._overlay: Overlay | None = None
         self._announce_ready = False
+        self._hands_free = hands_free
+        self._connection: Any = None
+        self._switching = False  # a planned reconnect for a mode change
         self._stopping = False
+
+    def _ready_text(self) -> str:
+        if self._hands_free:
+            return f"Ready — just talk (hands-free; {self._key_name.upper()} stops me)"
+        return f"Ready — hold {self._key_name.upper()} to talk"
+
+    def _toggle_hands_free(self, _icon: Any = None, _item: Any = None) -> None:
+        """Voice Live fixes the mode per connection, so switching reconnects
+        (same conversation, so Abogi keeps the thread)."""
+        self._hands_free = not self._hands_free
+        logger.info("Hands-free listening %s; reconnecting.", "on" if self._hands_free else "off")
+        self._switching = True
+        self._announce_ready = True
+        connection = self._connection
+        if connection is not None:
+            asyncio.run_coroutine_threadsafe(connection.close(), self._loop)
 
     # Called from other threads (keyboard hook, audio callback, tray): hop onto the loop.
     def _submit(self, make: Callable[[VoiceSession], Any]) -> None:
@@ -284,8 +314,8 @@ class TrayClient:
     def _show(self, state: str, text: str | None = None, linger_ms: int | None = None) -> None:
         if state == IDLE and text is None and self._announce_ready:
             self._announce_ready = False
-            logger.info("Ready. Hold %s to talk.", self._key_name.upper())
-            text, linger_ms = f"Ready — hold {self._key_name.upper()} to talk", 4000
+            text, linger_ms = self._ready_text(), 4000
+            logger.info(text)
         if self._icon is not None:
             self._icon.icon = icon_image(state)
             self._icon.title = f"Abogi: {state}"
@@ -301,6 +331,7 @@ class TrayClient:
         from azure.ai.voicelive.aio import connect
 
         conversation_id: str | None = None
+        last_turn: float | None = None
         delay = 1.0
         while not self._stopping:
             try:
@@ -311,16 +342,27 @@ class TrayClient:
                     project_name=self._project,
                     conversation_id=conversation_id,
                 ) as connection:
-                    await connection.session.update(session=session_config(self._voice))
+                    self._connection = connection
+                    self._switching = False
+                    await connection.session.update(
+                        session=session_config(self._voice, hands_free=self._hands_free)
+                    )
                     session = VoiceSession(
-                        connection, speaker, on_state=self._show, on_text=self._said
+                        connection,
+                        speaker,
+                        hands_free=self._hands_free,
+                        last_turn=last_turn,
+                        on_state=self._show,
+                        on_text=self._said,
                     )
                     session.conversation_id = conversation_id
                     self._session = session
                     logger.info("Connected to Voice Live (agent %s); warming up.", self._agent)
                     self._announce_ready = True  # say "Ready" once the warm-up is done
-                    self._show(WARMING)
-                    await session.warm()
+                    if await session.warm():
+                        self._show(WARMING)
+                    else:
+                        self._show(IDLE)  # still warm after a mode switch: ready at once
                     delay = 1.0
                     rewarm = asyncio.create_task(self._keep_warm(session))
                     try:
@@ -329,9 +371,14 @@ class TrayClient:
                             conversation_id = session.conversation_id
                     finally:
                         rewarm.cancel()
+                        last_turn = session.last_turn
             except Exception as error:  # noqa: BLE001 - reconnect on any connection failure
-                logger.warning("Voice Live connection lost: %s: %s", type(error).__name__, error)
+                if not self._switching:
+                    logger.warning("Voice Live connection lost: %s: %s", type(error).__name__, error)
             self._session = None
+            self._connection = None
+            if self._switching:
+                continue  # planned reconnect: no offline state, no back-off
             self._show(OFFLINE)
             if not self._stopping:
                 await asyncio.sleep(delay)
@@ -388,7 +435,14 @@ class TrayClient:
             "abogi",
             icon_image(OFFLINE),
             "Abogi: connecting",
-            menu=pystray.Menu(pystray.MenuItem("Quit Abogi", quit_app)),
+            menu=pystray.Menu(
+                pystray.MenuItem(
+                    "Hands-free listening",
+                    self._toggle_hands_free,
+                    checked=lambda _item: self._hands_free,
+                ),
+                pystray.MenuItem("Quit Abogi", quit_app),
+            ),
         )
         self._icon.run_detached()  # the tray runs on its own thread; Tk needs the main one
         try:
@@ -412,6 +466,7 @@ def main() -> None:
         key_name=os.environ.get("ABOGI_VOICE_KEY", "f9"),
         voice=os.environ.get("ABOGI_VOICE", DEFAULT_VOICE),
         tenant_id=os.environ.get("ABOGI_TENANT_ID") or None,
+        hands_free=os.environ.get("ABOGI_VOICE_MODE", "push-to-talk").lower() == "hands-free",
     ).run()
 
 

@@ -43,7 +43,45 @@ class Player(Protocol):
     def flush(self) -> None: ...
 
 
-def session_config(voice: str = DEFAULT_VOICE, language: str = "en") -> dict[str, Any]:
+def turn_detection(hands_free: bool) -> dict[str, Any] | None:
+    """None for push-to-talk (the key ends a turn); semantic VAD for hands-free.
+
+    Semantic VAD judges the end of a turn by what was said, not only by
+    silence, so a pause mid-sentence is less likely to send the question
+    early. The server answers by itself and stops speaking when interrupted.
+    """
+    if not hands_free:
+        return None
+    return {
+        "type": "azure_semantic_vad",
+        "silence_duration_ms": 600,
+        "create_response": True,
+        "interrupt_response": True,
+        "auto_truncate": True,
+    }
+
+
+def mode_settings(hands_free: bool) -> dict[str, Any]:
+    """The session settings that change with the mode.
+
+    The mode is fixed for a connection: Voice Live refuses to turn turn
+    detection on mid-session ("Cannot enable turn detection during session"),
+    so switching means reconnecting with the same `conversation_id`. It also
+    rejects server echo cancellation when turn detection is off, so that goes
+    on and off with hands-free, which needs it most: the microphone is live
+    while Abogi speaks.
+    """
+    return {
+        "turn_detection": turn_detection(hands_free),
+        "input_audio_echo_cancellation": (
+            {"type": "server_echo_cancellation"} if hands_free else None
+        ),
+    }
+
+
+def session_config(
+    voice: str = DEFAULT_VOICE, language: str = "en", *, hands_free: bool = False
+) -> dict[str, Any]:
     """Agent-mode session settings. No `instructions`: the persona is the agent's."""
     return {
         "modalities": ["text", "audio"],
@@ -51,7 +89,8 @@ def session_config(voice: str = DEFAULT_VOICE, language: str = "en") -> dict[str
         "input_audio_format": "pcm16",
         "output_audio_format": "pcm16",
         "input_audio_transcription": {"model": "azure-speech", "language": language},
-        "turn_detection": None,  # push-to-talk: the key says when a turn ends
+        "input_audio_noise_reduction": {"type": "azure_deep_noise_suppression"},
+        **mode_settings(hands_free),
     }
 
 
@@ -69,6 +108,8 @@ class VoiceSession:
         clock: Callable[[], float] = time.monotonic,
         idle_timeout: float = IDLE_TIMEOUT_SECONDS,
         min_press: float = 0.25,
+        hands_free: bool = False,
+        last_turn: float | None = None,
         on_state: Callable[[str], None] = lambda state: None,
         on_text: Callable[[str, str], None] = lambda who, text: None,
     ) -> None:
@@ -81,8 +122,9 @@ class VoiceSession:
         self._on_text = on_text
 
         self.state = IDLE
+        self.hands_free = hands_free
         self.conversation_id: str | None = None
-        self._last_turn: float | None = None
+        self._last_turn = last_turn  # carried over a reconnect, so a warm agent is not re-warmed
         self._pressed_at = 0.0
         self._active_id: str | None = None  # the reply being thought about or spoken
         self._awaiting_reply = False  # response.create sent, response.created not seen yet
@@ -93,6 +135,10 @@ class VoiceSession:
         self._pending_reply = False  # audio committed, waiting for the warm-up to finish
 
     # --- inputs from the client ----------------------------------------
+
+    @property
+    def last_turn(self) -> float | None:
+        return self._last_turn
 
     def is_cold(self) -> bool:
         if self._last_turn is None:
@@ -111,6 +157,12 @@ class VoiceSession:
         return True
 
     async def key_down(self) -> None:
+        if self.hands_free:
+            # No key needed to talk; the key only stops Abogi mid-answer.
+            if self.state in (THINKING, SPEAKING):
+                await self._cancel_current()
+                self._set(IDLE)
+            return
         if self.state == LISTENING:
             return  # key repeat
         if self.state in (THINKING, SPEAKING):
@@ -122,11 +174,13 @@ class VoiceSession:
         await self.warm()  # reheats while the owner speaks, if it went cold
 
     async def audio(self, pcm: bytes) -> None:
-        if self.state == LISTENING:
+        # Hands-free streams all the time (the server hears speech start and
+        # stop, including over Abogi's own answer); push-to-talk only while held.
+        if self.state == LISTENING or (self.hands_free and not self._warming):
             await self._connection.input_audio_buffer.append(audio=base64.b64encode(pcm).decode())
 
     async def key_up(self) -> None:
-        if self.state != LISTENING:
+        if self.hands_free or self.state != LISTENING:
             return
         if self._clock() - self._pressed_at < self._min_press:
             await self._connection.input_audio_buffer.clear()
@@ -146,7 +200,19 @@ class VoiceSession:
         response = getattr(event, "response", None)
         response_id = getattr(event, "response_id", None) or getattr(response, "id", None)
 
-        if kind == "response.created":
+        if kind == "input_audio_buffer.speech_started" and self.hands_free:
+            # The owner started talking. If Abogi was answering, the server
+            # cancels it (interrupt_response); here only drop the queued audio.
+            if self._active_id:
+                self._muted.add(self._active_id)
+                self._active_id = None
+            if self.state in (THINKING, SPEAKING):
+                self._player.flush()
+            self._set(LISTENING)
+        elif kind == "input_audio_buffer.speech_stopped" and self.hands_free:
+            self._awaiting_reply = True  # create_response: the server asks the agent
+            self._set(THINKING)
+        elif kind == "response.created":
             self.conversation_id = getattr(response, "conversation_id", None) or self.conversation_id
             if self._awaiting_reply:
                 self._awaiting_reply = False
@@ -186,6 +252,8 @@ class VoiceSession:
             self._muted.discard(response_id)
             return
         self._last_turn = self._clock()
+        if self.hands_free and self.state == LISTENING and not self._warming:
+            return  # a cancelled reply finished while the owner is talking again
         if self._warming and (response_id is None or response_id == self._warm_id):
             self._warming = False
             self._warm_id = None

@@ -9,8 +9,10 @@ Nothing leaves the computer until the wake word is heard: the voice session
 sends audio only while awake (see `VoiceSession.wake()`).
 
 The model is openWakeWord's pre-trained "hey_jarvis" (Apache 2.0), downloaded
-once on first use. openWakeWord needs onnxruntime, which has no wheels for
-Python 3.15 yet, so the tray runs on Python 3.14.
+once on first use, unless `ABOGI_WAKE_WORD` names another: a built-in model
+name, or the path of a custom .onnx model trained with openWakeWord's notebook
+(such as hey_abboggy.onnx). openWakeWord needs onnxruntime, which has no wheels
+for Python 3.15 yet, so the tray runs on Python 3.14.
 """
 
 from __future__ import annotations
@@ -20,13 +22,28 @@ import queue
 import threading
 import time
 from collections.abc import Callable
-from typing import Any
+from pathlib import Path, PureWindowsPath
+from typing import Any, NamedTuple
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "hey_jarvis"
 FRAME = 1280  # samples at 16 kHz: 80 ms, openWakeWord's frame
 COOLDOWN_SECONDS = 2.0  # one phrase fires once
+
+
+class WakeWord(NamedTuple):
+    source: str  # what openWakeWord loads: a built-in name or a .onnx path
+    key: str  # prefix of the model's score key (the file name for a custom model)
+    phrase: str  # what the owner says, for the tray
+
+
+def wake_word(setting: str | None) -> WakeWord:
+    """The wake word from ABOGI_WAKE_WORD: a built-in name, or a custom .onnx file."""
+    source = (setting or "").strip() or DEFAULT_MODEL
+    # PureWindowsPath splits on / and \, so a Windows path works wherever this runs
+    key = PureWindowsPath(source).stem if source.lower().endswith(".onnx") else source
+    return WakeWord(source, key, key.replace("_", " ").title())
 
 
 class WakeDetector:
@@ -36,12 +53,14 @@ class WakeDetector:
         *,
         model: Any = None,
         name: str = DEFAULT_MODEL,
+        source: str | None = None,
         threshold: float = 0.5,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._on_wake = on_wake
         self._model = model  # anything with predict(int16 frame) -> {name: score}
         self._name = name
+        self._source = source or name
         self._threshold = threshold
         self._clock = clock
         self._pending = bytearray()  # 24 kHz bytes not yet resampled
@@ -54,7 +73,7 @@ class WakeDetector:
 
     def start(self) -> None:
         if self._model is None:
-            self._model = load_model(self._name)
+            self._model = load_model(self._source)
         self._thread = threading.Thread(target=self._work, name="abogi-wake", daemon=True)
         self._thread.start()
 
@@ -119,7 +138,14 @@ def downsample_24k_to_16k(samples: Any) -> Any:
 
 
 def load_model(name: str) -> Any:
-    """openWakeWord's model for `name`, downloading it the first time."""
+    """openWakeWord's model for `name` (downloaded the first time), or a custom .onnx file."""
+    if name.lower().endswith(".onnx"):
+        path = Path(name).expanduser()
+        if not path.is_file():
+            raise FileNotFoundError(f"No wake word model at {path}")
+        from openwakeword.model import Model
+
+        return Model(wakeword_models=[str(path)], inference_framework="onnx")
     import openwakeword
     from openwakeword.model import Model
 

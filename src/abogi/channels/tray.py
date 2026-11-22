@@ -9,7 +9,8 @@ state: grey idle, blue warming, red listening, amber thinking, green speaking,
 black offline. Right-click the icon to quit or to turn on "Hands-free
 listening": then the microphone streams all the time, Voice Live decides
 when a turn starts and ends, and the key only stops Abogi mid-answer.
-Push-to-talk is the default; ABOGI_VOICE_MODE=hands-free starts hands-free.
+Push-to-talk is the default; ABOGI_VOICE_MODE=hands-free starts hands-free, and
+ABOGI_VOICE_MODE=wake-word waits for "Hey Jarvis" (heard on this computer).
 
 Runs on Windows, not WSL: WSL sees neither global keys nor the tray.
 
@@ -269,6 +270,7 @@ class TrayClient:
         voice: str,
         tenant_id: str | None,
         hands_free: bool = False,
+        wake_word: bool = False,
         briefing_times: str = "",
         alert_every: float = 300.0,
     ):
@@ -288,7 +290,9 @@ class TrayClient:
         self._icon: Any = None
         self._overlay: Overlay | None = None
         self._announce_ready = False
-        self._hands_free = hands_free
+        self._hands_free = hands_free and not wake_word
+        self._wake = wake_word  # hands-free connection, gated by the local wake word
+        self._detector: Any = None
         self._connection: Any = None
         self._switching = False  # a planned reconnect for a mode change
         self._stopping = False
@@ -302,6 +306,8 @@ class TrayClient:
         self._credential: AsyncCredential | None = None
 
     def _ready_text(self) -> str:
+        if self._wake:
+            return f'Ready — say "Hey Jarvis" ({self._key_name.upper()} stops me)'
         if self._hands_free:
             return f"Ready — just talk (hands-free; {self._key_name.upper()} stops me)"
         return f"Ready — hold {self._key_name.upper()} to talk"
@@ -310,7 +316,47 @@ class TrayClient:
         """Voice Live fixes the mode per connection, so switching reconnects
         (same conversation, so Abogi keeps the thread)."""
         self._hands_free = not self._hands_free
+        if self._hands_free:
+            self._wake = False
         logger.info("Hands-free listening %s; reconnecting.", "on" if self._hands_free else "off")
+        self._reconnect()
+
+    def _toggle_wake(self, _icon: Any = None, _item: Any = None) -> None:
+        if not self._wake and not self._start_detector():
+            return
+        self._wake = not self._wake
+        if self._wake:
+            self._hands_free = False
+        logger.info("Wake word %s; reconnecting.", "on" if self._wake else "off")
+        self._reconnect()
+
+    def _start_detector(self) -> bool:
+        """Load the wake word model once; False (and logged) if it cannot run here."""
+        if self._detector is not None:
+            return True
+        try:
+            from abogi.channels.wake import WakeDetector
+
+            detector = WakeDetector(self._heard_wake_word)
+            detector.start()
+        except Exception as error:  # noqa: BLE001 - e.g. openwakeword not installed
+            logger.warning("Wake word unavailable: %s: %s", type(error).__name__, error)
+            self._show(OFFLINE, "Wake word unavailable — see the log", 5000)
+            return False
+        self._detector = detector
+        return True
+
+    def _heard_wake_word(self) -> None:
+        if self._wake:
+            self._submit(lambda s: s.wake())
+
+    def _hear(self, pcm: bytes) -> None:
+        """Microphone chunk: to the session, and to the wake detector when it is on."""
+        self._submit(lambda s: s.audio(pcm))
+        if self._wake and self._detector is not None:
+            self._detector.feed(pcm)
+
+    def _reconnect(self) -> None:
         self._switching = True
         self._announce_ready = True
         connection = self._connection
@@ -335,6 +381,14 @@ class TrayClient:
             self._overlay.show(state, text, linger_ms)
         logger.debug("state: %s", state)
 
+    def _voice_error(self, message: str) -> None:
+        """A conversation the service no longer accepts (for example after the
+        agent was redeployed) fails every turn: start a fresh one instead."""
+        if "Conversation service API error" in message:
+            logger.info("Starting a fresh conversation.")
+            self._fresh_conversation = True
+            self._reconnect()
+
     def _said(self, who: str, text: str) -> None:
         if text:
             logger.info("%s: %s", who, text)
@@ -343,9 +397,13 @@ class TrayClient:
         from azure.ai.voicelive.aio import connect
 
         conversation_id: str | None = None
+        self._fresh_conversation = False
         last_turn: float | None = None
         delay = 1.0
         while not self._stopping:
+            if self._fresh_conversation:
+                conversation_id, last_turn = None, None  # new conversation, cold agent
+                self._fresh_conversation = False
             try:
                 async with connect(
                     endpoint=self._resource,
@@ -357,15 +415,17 @@ class TrayClient:
                     self._connection = connection
                     self._switching = False
                     await connection.session.update(
-                        session=session_config(self._voice, hands_free=self._hands_free)
+                        session=session_config(self._voice, hands_free=self._hands_free or self._wake)
                     )
                     session = VoiceSession(
                         connection,
                         speaker,
-                        hands_free=self._hands_free,
+                        hands_free=self._hands_free or self._wake,
+                        wake_word=self._wake,
                         last_turn=last_turn,
                         on_state=self._show,
                         on_text=self._said,
+                        on_error=self._voice_error,
                     )
                     session.conversation_id = conversation_id
                     self._session = session
@@ -463,7 +523,9 @@ class TrayClient:
         credential = sign_in(self._tenant_id)
         self._credential = credential
         speaker = Speaker()
-        microphone = open_microphone(lambda pcm: self._submit(lambda s: s.audio(pcm)))
+        if self._wake and not self._start_detector():
+            self._wake = False  # fall back to push-to-talk
+        microphone = open_microphone(self._hear)
 
         def matches(key: Any) -> bool:
             name = getattr(key, "name", None) or getattr(key, "char", None) or ""
@@ -508,6 +570,11 @@ class TrayClient:
                     self._toggle_hands_free,
                     checked=lambda _item: self._hands_free,
                 ),
+                pystray.MenuItem(
+                    'Wake word ("Hey Jarvis")',
+                    self._toggle_wake,
+                    checked=lambda _item: self._wake,
+                ),
                 pystray.MenuItem("Quit Abogi", quit_app),
             ),
         )
@@ -527,6 +594,7 @@ class TrayClient:
 def main() -> None:
     logging.basicConfig(level=os.environ.get("ABOGI_LOG_LEVEL", "INFO"), format="%(asctime)s %(message)s")
     logging.getLogger("azure").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # alert checks would log every request
     TrayClient(
         endpoint=os.environ["ABOGI_PROJECT_ENDPOINT"],
         agent=os.environ.get("ABOGI_AGENT_NAME", "abogi"),
@@ -534,6 +602,7 @@ def main() -> None:
         voice=os.environ.get("ABOGI_VOICE", DEFAULT_VOICE),
         tenant_id=os.environ.get("ABOGI_TENANT_ID") or None,
         hands_free=os.environ.get("ABOGI_VOICE_MODE", "push-to-talk").lower() == "hands-free",
+        wake_word=os.environ.get("ABOGI_VOICE_MODE", "push-to-talk").lower() == "wake-word",
         briefing_times=os.environ.get("ABOGI_BRIEFING_TIMES", ""),
         alert_every=_seconds(os.environ.get("ABOGI_ALERT_EVERY"), 300.0),
     ).run()

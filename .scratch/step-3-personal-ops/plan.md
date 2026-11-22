@@ -25,3 +25,8 @@ What Abogi keeps about the owner between conversations (glossary: profile, histo
 - Foundry's Responses endpoint rejects system and developer messages in `input` ("Invalid value: ''"), so per-turn notes go into the instructions. A synthetic `function_call` plus `function_call_output` pair is accepted, which is how an approved step's result reaches the model.
 - gpt-5-mini first asked "shall I?" before calling the tool, so nothing was held. The instructions now say to call an outward tool at once: the read-back is the question.
 - Checked through Voice Live on v14: request held and read back by title and time; "yes please" does not run it (the model holds it again); "Abogi, approve" runs it (403 until the new scopes are granted).
+
+## Steps 4 and 6, done on this branch (21 Nov 2026)
+- Step 4: briefings at `ABOGI_BRIEFING_TIMES`; alerts from a code-only check every 5 minutes (meetings within 10 minutes, mail from `ABOGI_ALERT_FROM`). Hosted agent v15. Discord is still to do.
+- Step 6: wake word "Hey Jarvis" with openWakeWord on the tray (Python 3.14; onnxruntime has no 3.15 wheels). Audio stays local until the wake word. Model loads and ignores silence; not yet tried by voice.
+- The old tray client got "Conversation service API error 403" on every re-warm after the agent was redeployed. The client now starts a fresh conversation when that happens.

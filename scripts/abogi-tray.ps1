@@ -8,4 +8,7 @@ $repo = Split-Path -Parent $PSScriptRoot
 $env:UV_PROJECT_ENVIRONMENT = Join-Path $env:LOCALAPPDATA 'abogi\venv'
 $env:UV_LINK_MODE = 'copy'  # hard links do not work across the WSL share
 Set-Location $repo
-uv run --extra tray --env-file .env python -m abogi.channels.tray
+# Python 3.14: the wake word's onnxruntime has no 3.15 wheels yet. openwakeword is
+# added here, not in pyproject: its Linux-only tflite-runtime breaks the
+# cross-platform lock, and only this Windows client needs it.
+uv run --python 3.14 --extra tray --with "openwakeword>=0.6" --env-file .env python -m abogi.channels.tray

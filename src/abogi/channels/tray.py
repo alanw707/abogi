@@ -269,8 +269,12 @@ class TrayClient:
         voice: str,
         tenant_id: str | None,
         hands_free: bool = False,
+        briefing_times: str = "",
+        alert_every: float = 300.0,
     ):
         from urllib.parse import urlsplit
+
+        from abogi.channels.proactive import AlertQueue, Briefings, parse_times
 
         parts = urlsplit(endpoint)
         self._resource = f"{parts.scheme}://{parts.netloc}"
@@ -288,6 +292,14 @@ class TrayClient:
         self._connection: Any = None
         self._switching = False  # a planned reconnect for a mode change
         self._stopping = False
+        self._endpoint = endpoint
+        self._briefings = Briefings(parse_times(briefing_times))
+        self._alerts = AlertQueue()
+        self._alert_every = alert_every  # 0 turns alerts off
+        self._last_check = 0.0
+        self._pending_briefing = False
+        self._agent_client: Any = None  # direct Responses client for alert checks
+        self._credential: AsyncCredential | None = None
 
     def _ready_text(self) -> str:
         if self._hands_free:
@@ -365,12 +377,14 @@ class TrayClient:
                         self._show(IDLE)  # still warm after a mode switch: ready at once
                     delay = 1.0
                     rewarm = asyncio.create_task(self._keep_warm(session))
+                    speak_first = asyncio.create_task(self._proactive(session))
                     try:
                         async for event in connection:
                             await session.handle(event)
                             conversation_id = session.conversation_id
                     finally:
                         rewarm.cancel()
+                        speak_first.cancel()
                         last_turn = session.last_turn
             except Exception as error:  # noqa: BLE001 - reconnect on any connection failure
                 if not self._switching:
@@ -390,11 +404,64 @@ class TrayClient:
             if session.state == IDLE:
                 await session.warm()
 
+    async def _proactive(self, session: VoiceSession) -> None:
+        """Briefings at their times, and alerts as they come up (step 4).
+
+        Only speaks when the session is idle, so it never talks over the owner
+        or over itself; queued alerts wait for the next quiet moment.
+        """
+        import time as clock
+        from datetime import datetime
+
+        from abogi.channels.proactive import BRIEFING_PROMPT, alert_prompt
+
+        while True:
+            await asyncio.sleep(15)
+            if self._briefings.due(datetime.now().astimezone()):
+                logger.info("Briefing time.")
+                self._pending_briefing = True
+            if self._alert_every and clock.monotonic() - self._last_check >= self._alert_every:
+                self._last_check = clock.monotonic()
+                try:
+                    found = await asyncio.to_thread(self._check_alerts)
+                    if self._alerts.add(found):
+                        logger.info("New alerts: %d", len(found))
+                except Exception as error:  # noqa: BLE001 - alerts must never stop the client
+                    logger.warning("Alert check failed: %s: %s", type(error).__name__, error)
+            if session.state != IDLE:
+                continue
+            if self._pending_briefing:
+                if await session.announce(BRIEFING_PROMPT):
+                    self._pending_briefing = False
+                continue
+            text = self._alerts.pop()
+            if text:
+                logger.info("Alert: %s", text)
+                self._show(THINKING, text, 6000)
+                if not await session.announce(alert_prompt(text)):
+                    self._alerts.add([{"id": f"retry:{text}", "text": text}])
+
+    def _check_alerts(self) -> list[dict[str, str]]:
+        """One code-only alert check against the hosted agent (blocking)."""
+        from abogi.channels.proactive import parse_alerts
+        from abogi.skills.alerts import ALERT_CHECK
+
+        if self._agent_client is None:
+            from azure.ai.projects import AIProjectClient
+
+            project = AIProjectClient(
+                endpoint=self._endpoint, credential=self._credential._credential, allow_preview=True
+            )
+            self._agent_client = project.get_openai_client(agent_name=self._agent)
+        response = self._agent_client.responses.create(input=ALERT_CHECK)
+        return parse_alerts(response.output_text or "")
+
     def run(self) -> None:
         import pystray
         from pynput import keyboard
 
         credential = sign_in(self._tenant_id)
+        self._credential = credential
         speaker = Speaker()
         microphone = open_microphone(lambda pcm: self._submit(lambda s: s.audio(pcm)))
 
@@ -467,7 +534,21 @@ def main() -> None:
         voice=os.environ.get("ABOGI_VOICE", DEFAULT_VOICE),
         tenant_id=os.environ.get("ABOGI_TENANT_ID") or None,
         hands_free=os.environ.get("ABOGI_VOICE_MODE", "push-to-talk").lower() == "hands-free",
+        briefing_times=os.environ.get("ABOGI_BRIEFING_TIMES", ""),
+        alert_every=_seconds(os.environ.get("ABOGI_ALERT_EVERY"), 300.0),
     ).run()
+
+
+def _seconds(text: str | None, default: float) -> float:
+    """A number of seconds from the environment; "0" or "off" turns it off."""
+    if text is None or not text.strip():
+        return default
+    if text.strip().lower() == "off":
+        return 0.0
+    try:
+        return max(0.0, float(text))
+    except ValueError:
+        return default
 
 
 if __name__ == "__main__":

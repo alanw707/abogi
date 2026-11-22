@@ -156,6 +156,19 @@ class VoiceSession:
             self._set(WARMING)
         return True
 
+    async def announce(self, prompt: str) -> bool:
+        """Have Abogi speak first (a briefing or an alert), if nothing is going on.
+
+        The prompt goes into the conversation as text and the reply is spoken
+        like any other; the owner can interrupt it the usual way.
+        """
+        if self.state != IDLE or self._warming:
+            return False
+        await self._send_text(prompt)
+        self._set(THINKING)
+        await self._ask_for_reply()
+        return True
+
     async def key_down(self) -> None:
         if self.hands_free:
             # No key needed to talk; the key only stops Abogi mid-answer.

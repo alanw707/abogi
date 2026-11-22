@@ -160,6 +160,22 @@ class GmailConnector:
         to = ", ".join(n for n in names if n) or "no one"
         return f"Send the email \"{head.get('subject', '(no subject)')}\" to {to}."
 
+    async def mail_alerts(self, senders: list[str]) -> list[dict[str, str]]:
+        """Unread mail from the last day from any of `senders`."""
+        query = "is:unread newer_than:1d from:(" + " OR ".join(senders) + ")"
+        found = await self._fetch("/messages", {"q": query, "maxResults": 5})
+        ids = [m["id"] for m in found.get("messages", [])]
+        heads = await asyncio.gather(*(self._headers(i) for i in ids))
+        alerts = []
+        for message_id, head in zip(ids, heads, strict=True):
+            sender = getaddresses([head.get("from", "")])
+            who = (sender[0][0] or sender[0][1]) if sender else "someone"
+            alerts.append({
+                "id": f"mail:{message_id}",
+                "text": f"New email from {who}: {head.get('subject', '(no subject)')}.",
+            })
+        return alerts
+
     async def _save(self, mail: EmailMessage, thread_id: str | None) -> str:
         message: dict[str, Any] = {"raw": base64.urlsafe_b64encode(mail.as_bytes()).decode()}
         if thread_id:

@@ -230,6 +230,33 @@ class GoogleCalendarConnector:
         keep = ("summary", "start", "end", "location", "description", "attendees", "organizer", "hangoutLink")
         return json.dumps({k: data[k] for k in keep if k in data}, ensure_ascii=False)
 
+    async def upcoming_alerts(self, now: datetime, minutes: int) -> list[dict[str, str]]:
+        """Timed events on the primary calendar starting within `minutes` of `now`."""
+        zone = ZoneInfo(await self._time_zone("primary"))
+        params = {
+            "timeMin": now.isoformat(),
+            "timeMax": (now + timedelta(minutes=minutes)).isoformat(),
+            "singleEvents": "true",
+            "orderBy": "startTime",
+            "maxResults": 10,
+        }
+        data = await self._fetch("/calendars/primary/events", params)
+        alerts = []
+        for event in data.get("items", []):
+            start = event.get("start", {}).get("dateTime")
+            if event.get("status") == "cancelled" or not start:
+                continue  # all-day events are for the briefing, not an interruption
+            begin = datetime.fromisoformat(start).astimezone(zone)
+            if begin < now:
+                continue  # already started
+            left = max(1, round((begin - now).total_seconds() / 60))
+            alerts.append({
+                "id": f"event:{event['id']}:{start}",
+                "text": f"{event.get('summary', 'An event')} starts at {spoken_clock(begin)}, "
+                f"in {left} minute{'s' if left != 1 else ''}.",
+            })
+        return alerts
+
     # --- changing events (outward: held for approval) -------------------------
 
     async def create_event(

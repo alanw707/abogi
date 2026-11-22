@@ -29,15 +29,27 @@ from abogi.connectors.google_mail import build_mail_connector
 from abogi.connectors.mcp_connector import McpConnector
 from abogi.core.loop import Tool
 
-__all__ = ["McpConnector", "load_tools"]
+__all__ = ["McpConnector", "load_connectors", "load_tools"]
 
 logger = logging.getLogger(__name__)
 
 
+_built: list[object] | None = None
+
+
+def load_connectors() -> list[object]:
+    """Every configured connector, built once per process (their token
+    providers cache the sign-in, so one instance each is shared)."""
+    global _built
+    if _built is None:
+        made = (build_calendar_connector(os.environ), build_mail_connector(os.environ))
+        _built = [c for c in made if c is not None]
+    return list(_built)
+
+
 async def load_tools() -> list[Tool]:
     """The tools of every configured connector; [] when none is configured."""
-    built = (build_calendar_connector(os.environ), build_mail_connector(os.environ))
-    connectors = [c for c in built if c is not None]
+    connectors = load_connectors()
     tools: list[Tool] = []
     for connector in connectors:
         try:

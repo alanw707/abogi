@@ -34,11 +34,22 @@ from azure.ai.agentserver.responses import (
 from abogi.core.approvals import Approvals, is_approval
 from abogi.core.loop import Tool, ToolCall, run_tool, stream_turn
 from abogi.hosting import backend
+from abogi.skills import alerts as alert_skill
 from abogi.hosting.instructions import INSTRUCTIONS, with_capabilities, with_model, with_now
 
 logger = logging.getLogger(__name__)
 
 ToolsProvider = Callable[[], Awaitable[list[Tool]]]
+AlertsProvider = Callable[[datetime], Awaitable[list[dict[str, str]]]]
+
+
+async def default_alerts_provider(now: datetime) -> list[dict[str, str]]:
+    """Alerts from the configured connectors (see `abogi.skills.alerts`)."""
+    try:
+        connectors = importlib.import_module("abogi.connectors").load_connectors()
+    except (ImportError, AttributeError):
+        return []
+    return await alert_skill.collect(connectors, os.environ, now)
 
 _TEXT_PARTS = {"input_text", "output_text"}
 _ROLES = {"user", "assistant"}
@@ -178,6 +189,7 @@ def create_app(
     instructions: str = INSTRUCTIONS,
     store: ResponseProviderProtocol | None = None,
     approvals: Approvals | None = None,
+    alerts_provider: AlertsProvider = default_alerts_provider,
 ) -> ResponsesAgentServerHost:
     """Build the server. Every argument has a production default; tests swap them."""
     app = ResponsesAgentServerHost(
@@ -195,6 +207,10 @@ def create_app(
         history = await context.get_history()
         current = await context.get_input_items()
         items = build_input(history, current)
+        if alert_skill.is_alert_check(build_input([], current)):
+            # Answered by code, no model call: the tray asks every few minutes.
+            found = await alerts_provider(datetime.now(ZoneInfo(backend.owner_time_zone())))
+            return TextResponse(context, request, text=alert_skill.answer(found))
         tools = await tools_provider()
         hold_key, last_key = approval_keys(context, request)
         note = await settle_pending(approvals, last_key, items, tools)

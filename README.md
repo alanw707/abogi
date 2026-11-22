@@ -40,6 +40,8 @@ One-time owner setup: `scripts/owner-setup.sh` walks through the Google OAuth cl
 | `ABOGI_CALENDAR_API=google` | Read Google Calendar directly (needs a Google sign-in) |
 | `ABOGI_GOOGLE_TOKEN_VAULT` | Key Vault URL holding the sign-in for the hosted agent |
 | `ABOGI_MAIL_API=google` | Read Gmail, write drafts, and send them after approval (same Google sign-in) |
+| `ABOGI_ALERT_MINUTES` | Alert when a meeting starts within this many minutes (default 10) |
+| `ABOGI_ALERT_FROM` | Comma-separated senders whose unread mail is an alert |
 
 Common commands (WSL, repo root):
 
@@ -60,7 +62,7 @@ Needs `uv` on Windows (`winget install astral-sh.uv`), `ABOGI_TENANT_ID` in `.en
 powershell -ExecutionPolicy Bypass -File <repo>\scripts\abogi-tray.ps1   # e.g. \\wsl.localhost\<distro>\home\<you>\projects\abogi
 ```
 
-The first run prints a code to enter at microsoft.com/devicelogin to sign in to Azure; later runs are silent. Hold F9 (`ABOGI_VOICE_KEY`) and speak, release to send, press again to interrupt. The tray dot is grey idle, blue warming, red listening, amber thinking, green speaking, black offline. For hands-free, right-click the tray dot and tick "Hands-free listening" (or start with `ABOGI_VOICE_MODE=hands-free`): just talk, and F9 only stops Abogi mid-answer. While it is on, everything the microphone hears is streamed to Azure. Optional: `ABOGI_VOICE` (an Azure voice name) and `ABOGI_AGENT_NAME`.
+The first run prints a code to enter at microsoft.com/devicelogin to sign in to Azure; later runs are silent. Hold F9 (`ABOGI_VOICE_KEY`) and speak, release to send, press again to interrupt. The tray dot is grey idle, blue warming, red listening, amber thinking, green speaking, black offline. For hands-free, right-click the tray dot and tick "Hands-free listening" (or start with `ABOGI_VOICE_MODE=hands-free`): just talk, and F9 only stops Abogi mid-answer. While it is on, everything the microphone hears is streamed to Azure. Abogi also speaks first: a briefing at each time in `ABOGI_BRIEFING_TIMES` (such as `07:30,17:45`), and alerts for meetings about to start or mail from `ABOGI_ALERT_FROM`, checked every `ABOGI_ALERT_EVERY` seconds (default 300, `off` to stop; the check runs in code, not the model). It waits until it is idle, and you can interrupt it like any answer. Optional: `ABOGI_VOICE` (an Azure voice name) and `ABOGI_AGENT_NAME`.
 
 If Azure sign-in times out, an old `az` in `~/.local/bin` is shadowing `/usr/bin/az`; put `/usr/bin` first on `PATH`.
 

@@ -22,6 +22,7 @@ The Windows wiring (microphone, speaker, hotkey, tray icon) is in `tray.py`.
 from __future__ import annotations
 
 import base64
+from collections import deque
 import logging
 import time
 from collections.abc import Callable
@@ -109,9 +110,12 @@ class VoiceSession:
         idle_timeout: float = IDLE_TIMEOUT_SECONDS,
         min_press: float = 0.25,
         hands_free: bool = False,
+        wake_word: bool = False,
+        awake_timeout: float = 8.0,
         last_turn: float | None = None,
         on_state: Callable[[str], None] = lambda state: None,
         on_text: Callable[[str, str], None] = lambda who, text: None,
+        on_error: Callable[[str], None] = lambda message: None,
     ) -> None:
         self._connection = connection
         self._player = player
@@ -120,6 +124,7 @@ class VoiceSession:
         self._min_press = min_press
         self._on_state = on_state
         self._on_text = on_text
+        self._on_error = on_error
 
         self.state = IDLE
         self.hands_free = hands_free
@@ -133,6 +138,14 @@ class VoiceSession:
         self._warming = False  # a warm-up response is in flight
         self._warm_id: str | None = None
         self._pending_reply = False  # audio committed, waiting for the warm-up to finish
+        # Wake word (hands-free connection): audio stays on this computer until
+        # wake() is called, then streams until the server hears the turn end.
+        self.wake_word = wake_word
+        self._awake = False
+        self._awake_at = 0.0
+        self._heard_speech = False
+        self._awake_timeout = awake_timeout
+        self._preroll: deque[bytes] = deque(maxlen=10)  # ~0.5 s before the wake word fired
 
     # --- inputs from the client ----------------------------------------
 
@@ -156,6 +169,19 @@ class VoiceSession:
             self._set(WARMING)
         return True
 
+    async def announce(self, prompt: str) -> bool:
+        """Have Abogi speak first (a briefing or an alert), if nothing is going on.
+
+        The prompt goes into the conversation as text and the reply is spoken
+        like any other; the owner can interrupt it the usual way.
+        """
+        if self.state != IDLE or self._warming:
+            return False
+        await self._send_text(prompt)
+        self._set(THINKING)
+        await self._ask_for_reply()
+        return True
+
     async def key_down(self) -> None:
         if self.hands_free:
             # No key needed to talk; the key only stops Abogi mid-answer.
@@ -173,11 +199,40 @@ class VoiceSession:
         self._set(LISTENING)
         await self.warm()  # reheats while the owner speaks, if it went cold
 
+    async def wake(self) -> None:
+        """The wake word was heard: stop any answer and start streaming the question."""
+        if not (self.hands_free and self.wake_word):
+            return
+        if self.state in (THINKING, SPEAKING):
+            await self._cancel_current()
+        self._awake, self._awake_at, self._heard_speech = True, self._clock(), False
+        self._set(LISTENING)
+        while self._preroll:  # the start of the question may overlap the wake word
+            await self._send_audio(self._preroll.popleft())
+
+    def _sleep(self) -> None:
+        self._awake = False
+        self._preroll.clear()
+
     async def audio(self, pcm: bytes) -> None:
         # Hands-free streams all the time (the server hears speech start and
         # stop, including over Abogi's own answer); push-to-talk only while held.
-        if self.state == LISTENING or (self.hands_free and not self._warming):
-            await self._connection.input_audio_buffer.append(audio=base64.b64encode(pcm).decode())
+        # With a wake word, hands-free streams only while awake.
+        if self.hands_free and self.wake_word:
+            if not self._awake:
+                self._preroll.append(pcm)
+                return
+            if not self._heard_speech and self._clock() - self._awake_at > self._awake_timeout:
+                self._sleep()  # woken by mistake, or the owner changed their mind
+                if self.state == LISTENING:
+                    self._set(IDLE)
+                return
+            await self._send_audio(pcm)
+        elif self.state == LISTENING or (self.hands_free and not self._warming):
+            await self._send_audio(pcm)
+
+    async def _send_audio(self, pcm: bytes) -> None:
+        await self._connection.input_audio_buffer.append(audio=base64.b64encode(pcm).decode())
 
     async def key_up(self) -> None:
         if self.hands_free or self.state != LISTENING:
@@ -201,6 +256,7 @@ class VoiceSession:
         response_id = getattr(event, "response_id", None) or getattr(response, "id", None)
 
         if kind == "input_audio_buffer.speech_started" and self.hands_free:
+            self._heard_speech = True
             # The owner started talking. If Abogi was answering, the server
             # cancels it (interrupt_response); here only drop the queued audio.
             if self._active_id:
@@ -210,6 +266,8 @@ class VoiceSession:
                 self._player.flush()
             self._set(LISTENING)
         elif kind == "input_audio_buffer.speech_stopped" and self.hands_free:
+            if self.wake_word:
+                self._sleep()  # the question is in; say the wake word again to interrupt
             self._awaiting_reply = True  # create_response: the server asks the agent
             self._set(THINKING)
         elif kind == "response.created":
@@ -241,7 +299,9 @@ class VoiceSession:
             await self._response_done(response_id)
         elif kind == "error":
             error = getattr(event, "error", None)
-            logger.warning("Voice Live error: %s", getattr(error, "message", error))
+            message = str(getattr(error, "message", error))
+            logger.warning("Voice Live error: %s", message)
+            self._on_error(message)
             if self.state in (THINKING, SPEAKING, WARMING):
                 self._warming = self._pending_reply = self._awaiting_reply = False
                 self._active_id = self._warm_id = None

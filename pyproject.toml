@@ -20,6 +20,7 @@ dependencies = [
 ]
 
 [project.scripts]
+abogi-profile = "abogi.profile:main"
 abogi = "abogi.cli:cli"
 
 [project.optional-dependencies]
@@ -35,9 +36,14 @@ tray = [
     "pillow>=11; sys_platform == 'win32'",
 ]
 
+discord = [
+    "discord.py>=2.5",
+]
+
 [dependency-groups]
 dev = [
     "azure-ai-voicelive[aiohttp]>=1.3.1",
+    "numpy>=2.5.5",
     "pytest>=8",
     "pytest-asyncio>=0.24",
 ]

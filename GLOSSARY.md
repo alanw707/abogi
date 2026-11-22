@@ -43,8 +43,12 @@ Any action whose effect leaves the sandbox and is visible to someone else, such 
 _Avoid_: Side effect, write, external action
 
 **Approval**:
-The owner's explicit go-ahead for one outward step; a spoken go-ahead is sufficient for any step.
+The owner's explicit go-ahead for one outward step: the phrase "Abogi, approve", spoken or typed, on the turn right after the step is read back. Enforced by the core, not the model ([ADR 0004](docs/adr/0004-approvals-enforced-in-code.md)).
 _Avoid_: Confirmation, permission, consent
+
+**Read-back**:
+The one sentence describing an outward step that the owner hears before approving it, built from the real data (the event's title and time, the email's recipients and subject).
+_Avoid_: Summary, preview
 
 **Briefing**:
 A scheduled spoken summary of what matters to the owner.

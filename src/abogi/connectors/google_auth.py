@@ -23,11 +23,14 @@ import anyio
 
 from abogi.connectors.mcp_connector import TokenProvider
 
-# Read-only calendar scopes, as listed in Google's Calendar MCP server guide.
+# Calendar: read calendars and free/busy, read and change events. Gmail: read
+# mail, and create and send drafts (compose); Abogi never deletes mail.
 SCOPES = [
     "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
     "https://www.googleapis.com/auth/calendar.events.freebusy",
-    "https://www.googleapis.com/auth/calendar.events.readonly",
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.compose",
 ]
 
 _CONFIG = Path.home() / ".config" / "abogi"
@@ -75,7 +78,10 @@ def _refreshing(load: Callable[[], dict]) -> TokenProvider:
     from google.auth.exceptions import RefreshError
 
     def reload() -> Credentials:
-        credentials[:] = [Credentials.from_authorized_user_info(load(), SCOPES)]
+        # The saved token's own scopes, not SCOPES: a sign-in from before a scope
+        # was added keeps working (the new tools report a permission error)
+        # until the owner signs in again.
+        credentials[:] = [Credentials.from_authorized_user_info(load())]
         return credentials[0]
 
     def fresh() -> str:

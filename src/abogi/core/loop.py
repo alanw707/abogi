@@ -7,6 +7,7 @@ Foundry deployment.
 
 from __future__ import annotations
 
+import inspect
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
@@ -27,6 +28,11 @@ class Tool:
     description: str
     parameters: dict[str, Any]  # JSON Schema for the arguments
     run: Callable[[dict[str, Any]], Awaitable[str]]
+    # An outward step (its effect reaches someone else) is never run by the
+    # loop: it is held for the owner's approval (ADR 0004). `read_back` turns
+    # the arguments into the sentence the owner hears before approving.
+    outward: bool = False
+    read_back: Callable[[dict[str, Any]], str | Awaitable[str]] | None = None
 
     def schema(self) -> dict[str, Any]:
         return {
@@ -42,6 +48,16 @@ class ToolCall:
     call_id: str
     name: str
     arguments: str  # raw JSON text, exactly as the model produced it
+
+
+Hold = Callable[[ToolCall, str], None]  # (the outward call, its read-back sentence)
+
+
+class Pause(str):
+    """A break in the spoken answer: tools are about to run. It joins as a space."""
+
+
+PAUSE = Pause(" ")
 
 
 class Action(Enum):
@@ -88,6 +104,9 @@ async def run_turn(
     tools: list[Tool],
     max_steps: int = 12,
     reasoning_effort: str | None = None,
+    *,
+    hold: Hold | None = None,
+    hosted_tools: list[dict[str, Any]] | None = None,
 ) -> str:
     """Run one owner turn to completion and return the spoken-length answer.
 
@@ -97,7 +116,8 @@ async def run_turn(
     chunks = [
         chunk
         async for chunk in stream_turn(
-            client, model, instructions, items, tools, max_steps, reasoning_effort
+            client, model, instructions, items, tools, max_steps, reasoning_effort,
+            hold=hold, hosted_tools=hosted_tools,
         )
     ]
     return "".join(chunks)
@@ -111,16 +131,26 @@ async def stream_turn(
     tools: list[Tool],
     max_steps: int = 12,
     reasoning_effort: str | None = None,
+    *,
+    hold: Hold | None = None,
+    hosted_tools: list[dict[str, Any]] | None = None,
 ) -> AsyncIterator[str]:
     """Like `run_turn`, but yields the answer text as the model writes it.
 
     A voice channel can start speaking on the first words instead of waiting
     for the whole answer. Text the model writes alongside a tool call (such as
     "Let me check.") is yielded too, so the owner hears it before the tool runs.
+
+    An outward tool call is passed to `hold` instead of being run; without
+    `hold` it is refused. At most one step per turn is held.
+
+    `hosted_tools` are platform tools such as `{"type": "web_search"}`: the
+    model service runs them itself, so they never reach `_dispatch`.
     """
     by_name = {tool.name: tool for tool in tools}
-    schemas = [tool.schema() for tool in tools]
+    schemas = [tool.schema() for tool in tools] + list(hosted_tools or [])
     past_calls: list[ToolCall] = []
+    held: list[ToolCall] = []
     step = 0
     ends_with_space = True  # nothing said yet, so no separator is needed
     # Sent only when set, so models that reject the parameter still work.
@@ -178,9 +208,9 @@ async def stream_turn(
             # what follows a full stop before it speaks the sentence, and without
             # this the next character would only come after the tools have run.
             ends_with_space = True
-            yield " "
+            yield PAUSE
         for call in calls:
-            items.append(_tool_output(call, await _run_tool(by_name, call)))
+            items.append(_tool_output(call, await _dispatch(by_name, call, hold, held)))
         past_calls.extend(calls)
 
 
@@ -212,7 +242,39 @@ async def _model_stream(client: Any, **request: Any) -> AsyncIterator[str | Any]
     yield final
 
 
-async def _run_tool(by_name: dict[str, Tool], call: ToolCall) -> str:
+HELD = (
+    "Not done yet: this step needs the owner's approval. Read it back in one "
+    'sentence, "{read_back}", then ask them to say "Abogi, approve". Do not say it is done.'
+)
+
+
+async def _dispatch(
+    by_name: dict[str, Tool], call: ToolCall, hold: Hold | None, held: list[ToolCall]
+) -> str:
+    """Run a sandboxed tool; hold an outward one for approval instead."""
+    tool = by_name.get(call.name)
+    if tool is None or not tool.outward:
+        return await run_tool(by_name, call)
+    if hold is None:
+        return "Not run: this step needs the owner's approval, and this channel cannot ask for it."
+    if held:
+        return (
+            "Not run: only one step can wait for approval at a time. "
+            "Offer this one again after the first is approved."
+        )
+    try:
+        arguments = json.loads(call.arguments or "{}")
+        read_back = tool.read_back(arguments) if tool.read_back else f"{tool.name} {call.arguments}"
+        if inspect.isawaitable(read_back):
+            read_back = await read_back  # such as looking up the event being moved
+    except Exception as error:  # noqa: BLE001 - bad arguments go back to the model to fix
+        return f"Error: {type(error).__name__}: {error}"
+    hold(call, read_back)
+    held.append(call)
+    return HELD.format(read_back=read_back)
+
+
+async def run_tool(by_name: dict[str, Tool], call: ToolCall) -> str:
     """Run one tool. Failures go back to the model as text so it can recover.
 
     Each run is an `execute_tool` span (OpenTelemetry GenAI conventions), so a

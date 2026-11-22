@@ -10,7 +10,8 @@ black offline. Right-click the icon to quit or to turn on "Hands-free
 listening": then the microphone streams all the time, Voice Live decides
 when a turn starts and ends, and the key only stops Abogi mid-answer.
 Push-to-talk is the default; ABOGI_VOICE_MODE=hands-free starts hands-free, and
-ABOGI_VOICE_MODE=wake-word waits for "Hey Jarvis" (heard on this computer).
+ABOGI_VOICE_MODE=wake-word waits for the wake word (heard on this computer):
+"Hey Jarvis", or the custom model in ABOGI_WAKE_WORD.
 
 Runs on Windows, not WSL: WSL sees neither global keys nor the tray.
 
@@ -273,10 +274,14 @@ class TrayClient:
         wake_word: bool = False,
         briefing_times: str = "",
         alert_every: float = 300.0,
+        wake_model: str = "",
     ):
         from urllib.parse import urlsplit
 
         from abogi.channels.proactive import AlertQueue, Briefings, parse_times
+        from abogi.channels.wake import wake_word as parse_wake_word
+
+        self._wake_word = parse_wake_word(wake_model)
 
         parts = urlsplit(endpoint)
         self._resource = f"{parts.scheme}://{parts.netloc}"
@@ -307,7 +312,7 @@ class TrayClient:
 
     def _ready_text(self) -> str:
         if self._wake:
-            return f'Ready — say "Hey Jarvis" ({self._key_name.upper()} stops me)'
+            return f'Ready — say "{self._wake_word.phrase}" ({self._key_name.upper()} stops me)'
         if self._hands_free:
             return f"Ready — just talk (hands-free; {self._key_name.upper()} stops me)"
         return f"Ready — hold {self._key_name.upper()} to talk"
@@ -337,7 +342,9 @@ class TrayClient:
         try:
             from abogi.channels.wake import WakeDetector
 
-            detector = WakeDetector(self._heard_wake_word)
+            detector = WakeDetector(
+                self._heard_wake_word, name=self._wake_word.key, source=self._wake_word.source
+            )
             detector.start()
         except Exception as error:  # noqa: BLE001 - e.g. openwakeword not installed
             logger.warning("Wake word unavailable: %s: %s", type(error).__name__, error)
@@ -571,7 +578,7 @@ class TrayClient:
                     checked=lambda _item: self._hands_free,
                 ),
                 pystray.MenuItem(
-                    'Wake word ("Hey Jarvis")',
+                    f'Wake word ("{self._wake_word.phrase}")',
                     self._toggle_wake,
                     checked=lambda _item: self._wake,
                 ),
@@ -605,6 +612,7 @@ def main() -> None:
         wake_word=os.environ.get("ABOGI_VOICE_MODE", "push-to-talk").lower() == "wake-word",
         briefing_times=os.environ.get("ABOGI_BRIEFING_TIMES", ""),
         alert_every=_seconds(os.environ.get("ABOGI_ALERT_EVERY"), 300.0),
+        wake_model=os.environ.get("ABOGI_WAKE_WORD", ""),
     ).run()
 
 

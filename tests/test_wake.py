@@ -92,6 +92,35 @@ def test_detector_scores_80ms_frames_at_16khz_and_fires_once_per_phrase():
     assert woke == [1]  # 0.9 fired; 0.95 right after is the same phrase
 
 
+def test_the_wake_word_is_built_in_or_a_custom_model_named_by_its_file():
+    from abogi.channels.wake import WakeWord, wake_word
+
+    assert wake_word(None) == WakeWord("hey_jarvis", "hey_jarvis", "Hey Jarvis")
+    custom = wake_word(r"C:\Users\owner\abogi\hey_abboggy.onnx")
+    assert custom.key == "hey_abboggy" and custom.phrase == "Hey Abboggy"
+    assert custom.source.endswith("hey_abboggy.onnx")
+
+
+def test_a_custom_model_is_scored_by_its_own_key():
+    from abogi.channels.wake import WakeDetector
+
+    class Custom(FakeModel):
+        def predict(self, frame):
+            return {"hey_abboggy": self.scores.pop(0) if self.scores else 0.0}
+
+    woke = []
+    detector = WakeDetector(lambda: woke.append(1), model=Custom([0.8]), name="hey_abboggy")
+    detector.process(np.zeros(1920, dtype=np.int16).tobytes())  # one 80 ms frame
+    assert woke == [1]
+
+
+def test_a_missing_custom_model_says_where_it_looked(tmp_path):
+    from abogi.channels.wake import load_model
+
+    with pytest.raises(FileNotFoundError, match="No wake word model"):
+        load_model(str(tmp_path / "hey_abboggy.onnx"))
+
+
 def test_downsampling_keeps_two_of_every_three_samples():
     from abogi.channels.wake import downsample_24k_to_16k
 

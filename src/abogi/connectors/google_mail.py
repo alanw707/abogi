@@ -29,6 +29,7 @@ from abogi.core.loop import Tool
 API = "https://gmail.googleapis.com/gmail/v1/users/me"
 MAX_RESULTS = 15
 MAX_BODY_CHARS = 4000
+SELF = {"me", "myself", "owner"}  # stand-ins the model may use for the owner's own address
 DEFAULT_QUERY = "is:unread newer_than:3d -category:promotions -category:social"
 
 
@@ -80,7 +81,11 @@ class GmailConnector:
                 {
                     "type": "object",
                     "properties": {
-                        "to": {"type": "array", "items": {"type": "string"}, "description": "Email addresses."},
+                        "to": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": 'Email addresses; "me" is the owner.',
+                        },
                         "subject": {"type": "string"},
                         "body": {"type": "string"},
                     },
@@ -144,7 +149,7 @@ class GmailConnector:
 
     async def draft_email(self, to: list[str], subject: str, body: str) -> str:
         mail = EmailMessage()
-        mail["To"] = ", ".join(to)
+        mail["To"] = ", ".join([await self._owner_address() if a.strip().lower() in SELF else a for a in to])
         mail["Subject"] = subject
         mail.set_content(body)
         return await self._save(mail, None)
@@ -162,13 +167,17 @@ class GmailConnector:
 
     async def save_report(self, subject: str, markdown: str) -> str:
         """Save a report as a draft addressed to the owner (inside the sandbox)."""
-        if not getattr(self, "_owner", None):
-            self._owner = (await self._fetch("/profile", {})).get("emailAddress", "")
         mail = EmailMessage()
-        mail["To"] = self._owner
+        mail["To"] = await self._owner_address()
         mail["Subject"] = subject
         mail.set_content(markdown)
         return await self._save(mail, None)
+
+    async def _owner_address(self) -> str:
+        """The signed-in owner's address, from Gmail itself (never stored in Abogi)."""
+        if not getattr(self, "_owner", None):
+            self._owner = (await self._fetch("/profile", {})).get("emailAddress", "")
+        return self._owner
 
     async def mail_alerts(self, senders: list[str]) -> list[dict[str, str]]:
         """Unread mail from the last day from any of `senders`."""

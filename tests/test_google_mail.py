@@ -52,6 +52,8 @@ def fake_gmail():
             ]}}}
         if path == "/drafts/send":
             return {"id": "sent1"}
+        if path == "/profile":
+            return {"emailAddress": "owner@example.com"}
         raise AssertionError(path)
 
     return GmailConnector(fetch, "America/Los_Angeles"), calls
@@ -89,6 +91,15 @@ def test_a_reply_draft_threads_and_quotes_nothing_it_was_not_given():
     mail = email.message_from_bytes(base64.urlsafe_b64decode(body["raw"]))
     assert mail["In-Reply-To"] == "<abc@example.com>"
     assert mail.get_payload().strip() == "Tuesday works."
+
+
+def test_a_draft_to_me_goes_to_the_owners_own_address_from_gmail():
+    connector, calls = fake_gmail()
+    draft = tools(connector)["draft_email"]
+    anyio.run(draft.run, {"to": ["me", "sam@example.com"], "subject": "Test", "body": "Hi."})
+    mail = email.message_from_bytes(base64.urlsafe_b64decode(calls[-1][3]["message"]["raw"]))
+    assert mail["To"] == "owner@example.com, sam@example.com"
+    assert [c[1] for c in calls].count("/profile") == 1
 
 
 def test_sending_reads_back_recipient_and_subject():

@@ -20,6 +20,7 @@ dependencies = [
 ]
 
 [project.scripts]
+abogi-profile = "abogi.profile:main"
 abogi = "abogi.cli:cli"
 
 [project.optional-dependencies]

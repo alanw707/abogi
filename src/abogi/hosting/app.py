@@ -37,6 +37,7 @@ from abogi.hosting import backend
 from abogi.skills import alerts as alert_skill
 from abogi.skills import research as research_skill
 from abogi.hosting.spoken import SpokenResponse, speakable
+from abogi.profile import with_profile
 from abogi.hosting.instructions import INSTRUCTIONS, with_capabilities, with_model, with_now
 
 logger = logging.getLogger(__name__)
@@ -168,7 +169,11 @@ def _field(request: Any, name: str) -> Any:
 
 
 async def settle_pending(
-    approvals: Approvals, key: str | None, items: list[dict[str, Any]], tools: list[Tool]
+    approvals: Approvals,
+    key: str | None,
+    items: list[dict[str, Any]],
+    tools: list[Tool],
+    memory: Any = None,
 ) -> str | None:
     """Run or drop the conversation's pending outward step (ADR 0004).
 
@@ -187,6 +192,8 @@ async def settle_pending(
         return NOTHING_PENDING
     call: ToolCall = pending.call
     output = await run_tool({tool.name: tool for tool in tools}, call)
+    if memory is not None:  # history: the core records what it ran, not the model
+        await memory.record(pending.read_back, output, datetime.now(ZoneInfo(backend.owner_time_zone())))
     items.append(
         {"type": "function_call", "call_id": call.call_id, "name": call.name, "arguments": call.arguments}
     )
@@ -205,6 +212,7 @@ def create_app(
     alerts_provider: AlertsProvider = default_alerts_provider,
     skills_provider: SkillsProvider = default_skills_provider,
     hosted_tools: list[dict[str, Any]] | None = None,
+    memory: Any = None,
 ) -> ResponsesAgentServerHost:
     """Build the server. Every argument has a production default; tests swap them."""
     app = ResponsesAgentServerHost(
@@ -213,6 +221,8 @@ def create_app(
     )
     client: Any = None  # created on first request so startup needs no credentials
     approvals = approvals or Approvals()
+    # None: build the default store on first request; False: no memory (tests).
+    remembered: list[Any] = [] if memory is None else [memory or None]
 
     @app.response_handler
     async def handler(request: CreateResponse, context: ResponseContext, cancellation_signal: asyncio.Event):
@@ -227,14 +237,19 @@ def create_app(
             found = await alerts_provider(datetime.now(ZoneInfo(backend.owner_time_zone())))
             return TextResponse(context, request, text=alert_skill.answer(found))
         model_name = model or backend.model_name()
-        tools = await tools_provider() + skills_provider(client, model_name)
+        if not remembered:
+            remembered.append(_default_memory())
+        mind = remembered[0]
+        tools = await tools_provider() + skills_provider(client, model_name) + (mind.tools() if mind else [])
         hold_key, last_key = approval_keys(context, request)
-        note = await settle_pending(approvals, last_key, items, tools)
+        note = await settle_pending(approvals, last_key, items, tools, mind)
         now = datetime.now(ZoneInfo(backend.owner_time_zone()))
         turn_instructions = with_now(
             with_model(with_capabilities(instructions, [tool.name for tool in tools]), model_name),
             now,
         )
+        if mind is not None:
+            turn_instructions = with_profile(turn_instructions, await mind.profile())
         if note:
             turn_instructions += f"\n\nAbout this turn: {note}"
         # Streamed, so Voice Live can start speaking on the first words.
@@ -251,6 +266,17 @@ def create_app(
         return SpokenResponse(context, request, text=speakable(answer))
 
     return app
+
+
+def _default_memory() -> Any:
+    """The owner's profile and history store, or None when it cannot be set up."""
+    try:
+        from abogi.profile import Memory, build_store
+
+        return Memory(build_store())
+    except Exception as error:  # noqa: BLE001 - Abogi still works without memory
+        logger.warning("Profile and history unavailable: %s: %s", type(error).__name__, error)
+        return None
 
 
 def _instrument_http_calls() -> None:

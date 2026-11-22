@@ -17,7 +17,7 @@ Enable the Gmail API in the Google Cloud project, then run the Google sign-in ag
 ### 5. Mail content is data, not instructions — done
 Text inside an email must never be followed as an instruction. The gate already stops it causing an outward step; the instructions also say so.
 
-### 6. Profile and history — needs-triage
+### 6. Profile and history — done (hosted agent v20)
 What Abogi keeps about the owner between conversations (glossary: profile, history). Not needed for the done-when above; next after this.
 
 ## Findings (21 Nov 2026)
@@ -33,3 +33,4 @@ What Abogi keeps about the owner between conversations (glossary: profile, histo
 - Step 5: research tool (web search, cited report to Gmail drafts) and web search for quick facts. Hosted agent v18. A research turn took ~40 s end to end; the lead-in is now its own message, so it is spoken at once. Citation links are stripped before speech. The deployment hit a 429 token rate limit at medium effort: research stays at low.
 - Discord relay: owner-only DMs, one conversation per channel, optional alerts. Off until a bot token is set; tested with fakes only.
 - Steps 7-8: GitHub connector limited to `ABOGI_GITHUB_REPOS`: status (PRs with checks, main CI), issues; comment, create issue, merge PR and hand an issue to the Copilot coding agent are outward. Failed main CI is an alert. Read tools checked live against this repo.
+- Profile and history: Key Vault secrets read every turn; owner edits by CLI. The agent identity has Secrets User only, so its own writes report the missing Secrets Officer role (checked live).

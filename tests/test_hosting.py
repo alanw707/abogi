@@ -56,6 +56,7 @@ def serve(model, tools=None):
         store=InMemoryResponseProvider(),
         skills_provider=lambda client, model: [],
         hosted_tools=[],
+        memory=False,
     )
     return TestClient(app)
 

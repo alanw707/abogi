@@ -35,6 +35,10 @@ tray = [
     "pillow>=11; sys_platform == 'win32'",
 ]
 
+discord = [
+    "discord.py>=2.5",
+]
+
 [dependency-groups]
 dev = [
     "azure-ai-voicelive[aiohttp]>=1.3.1",

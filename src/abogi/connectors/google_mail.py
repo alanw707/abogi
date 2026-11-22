@@ -160,6 +160,16 @@ class GmailConnector:
         to = ", ".join(n for n in names if n) or "no one"
         return f"Send the email \"{head.get('subject', '(no subject)')}\" to {to}."
 
+    async def save_report(self, subject: str, markdown: str) -> str:
+        """Save a report as a draft addressed to the owner (inside the sandbox)."""
+        if not getattr(self, "_owner", None):
+            self._owner = (await self._fetch("/profile", {})).get("emailAddress", "")
+        mail = EmailMessage()
+        mail["To"] = self._owner
+        mail["Subject"] = subject
+        mail.set_content(markdown)
+        return await self._save(mail, None)
+
     async def mail_alerts(self, senders: list[str]) -> list[dict[str, str]]:
         """Unread mail from the last day from any of `senders`."""
         query = "is:unread newer_than:1d from:(" + " OR ".join(senders) + ")"

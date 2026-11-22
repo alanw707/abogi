@@ -35,12 +35,25 @@ from abogi.core.approvals import Approvals, is_approval
 from abogi.core.loop import Tool, ToolCall, run_tool, stream_turn
 from abogi.hosting import backend
 from abogi.skills import alerts as alert_skill
+from abogi.skills import research as research_skill
+from abogi.hosting.spoken import SpokenResponse, speakable
 from abogi.hosting.instructions import INSTRUCTIONS, with_capabilities, with_model, with_now
 
 logger = logging.getLogger(__name__)
 
 ToolsProvider = Callable[[], Awaitable[list[Tool]]]
 AlertsProvider = Callable[[datetime], Awaitable[list[dict[str, str]]]]
+SkillsProvider = Callable[[Any, str], list[Tool]]
+
+
+def default_skills_provider(client: Any, model: str) -> list[Tool]:
+    """Skills built on the model client itself, such as research."""
+    try:
+        connectors = importlib.import_module("abogi.connectors").load_connectors()
+    except (ImportError, AttributeError):
+        connectors = []
+    mail = next((c for c in connectors if hasattr(c, "save_report")), None)
+    return [research_skill.ResearchSkill(client, model, mail).tool()]
 
 
 async def default_alerts_provider(now: datetime) -> list[dict[str, str]]:
@@ -190,6 +203,8 @@ def create_app(
     store: ResponseProviderProtocol | None = None,
     approvals: Approvals | None = None,
     alerts_provider: AlertsProvider = default_alerts_provider,
+    skills_provider: SkillsProvider = default_skills_provider,
+    hosted_tools: list[dict[str, Any]] | None = None,
 ) -> ResponsesAgentServerHost:
     """Build the server. Every argument has a production default; tests swap them."""
     app = ResponsesAgentServerHost(
@@ -211,11 +226,11 @@ def create_app(
             # Answered by code, no model call: the tray asks every few minutes.
             found = await alerts_provider(datetime.now(ZoneInfo(backend.owner_time_zone())))
             return TextResponse(context, request, text=alert_skill.answer(found))
-        tools = await tools_provider()
+        model_name = model or backend.model_name()
+        tools = await tools_provider() + skills_provider(client, model_name)
         hold_key, last_key = approval_keys(context, request)
         note = await settle_pending(approvals, last_key, items, tools)
         now = datetime.now(ZoneInfo(backend.owner_time_zone()))
-        model_name = model or backend.model_name()
         turn_instructions = with_now(
             with_model(with_capabilities(instructions, [tool.name for tool in tools]), model_name),
             now,
@@ -231,8 +246,9 @@ def create_app(
             tools,
             reasoning_effort=backend.reasoning_effort(),
             hold=lambda call, read_back: approvals.hold(hold_key, call, read_back),
+            hosted_tools=research_skill.hosted_tools() if hosted_tools is None else hosted_tools,
         )
-        return TextResponse(context, request, text=answer)
+        return SpokenResponse(context, request, text=speakable(answer))
 
     return app
 

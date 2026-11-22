@@ -54,6 +54,8 @@ def serve(model, tools=None):
         model="test-model",
         tools_provider=provider,
         store=InMemoryResponseProvider(),
+        skills_provider=lambda client, model: [],
+        hosted_tools=[],
     )
     return TestClient(app)
 
@@ -298,3 +300,23 @@ def test_owner_time_zone_setting():
     assert owner_time_zone({"ABOGI_TIMEZONE": "Asia/Taipei"}) == "Asia/Taipei"
     with pytest.raises(RuntimeError):
         owner_time_zone({"ABOGI_TIMEZONE": "Mars/Base"})
+
+
+def test_a_lead_in_is_its_own_message_before_the_tools_run():
+    preamble = SimpleNamespace(
+        output=[
+            Item(type="message", role="assistant", content="Let me check."),
+            Item(type="function_call", call_id="c1", name="look", arguments="{}"),
+        ],
+        output_text="Let me check.",
+    )
+
+    async def look(arguments):
+        return "Dentist at 3pm."
+
+    tool = Tool("look", "Look.", {"type": "object", "properties": {}}, look)
+    model = FakeModel(preamble, text("Dentist at three."))
+    with serve(model, [tool]) as client:
+        reply = client.post("/responses", json={"model": "x", "input": "Anything?"}).json()
+    texts = [part["text"] for item in reply["output"] for part in item["content"]]
+    assert texts == ["Let me check.", "Dentist at three."]

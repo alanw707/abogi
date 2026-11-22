@@ -133,7 +133,8 @@ def serve(model, tools):
         return tools
 
     app = create_app(
-        client_factory=lambda: model, model="m", tools_provider=provider, store=InMemoryResponseProvider()
+        client_factory=lambda: model, model="m", tools_provider=provider, store=InMemoryResponseProvider(),
+        skills_provider=lambda client, model: [], hosted_tools=[],
     )
     return TestClient(app)
 

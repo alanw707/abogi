@@ -53,6 +53,13 @@ class ToolCall:
 Hold = Callable[[ToolCall, str], None]  # (the outward call, its read-back sentence)
 
 
+class Pause(str):
+    """A break in the spoken answer: tools are about to run. It joins as a space."""
+
+
+PAUSE = Pause(" ")
+
+
 class Action(Enum):
     FINISH = "finish"  # the model's text is the answer; return it
     RUN_TOOLS = "run_tools"  # run the requested tools and call the model again
@@ -99,6 +106,7 @@ async def run_turn(
     reasoning_effort: str | None = None,
     *,
     hold: Hold | None = None,
+    hosted_tools: list[dict[str, Any]] | None = None,
 ) -> str:
     """Run one owner turn to completion and return the spoken-length answer.
 
@@ -108,7 +116,8 @@ async def run_turn(
     chunks = [
         chunk
         async for chunk in stream_turn(
-            client, model, instructions, items, tools, max_steps, reasoning_effort, hold=hold
+            client, model, instructions, items, tools, max_steps, reasoning_effort,
+            hold=hold, hosted_tools=hosted_tools,
         )
     ]
     return "".join(chunks)
@@ -124,6 +133,7 @@ async def stream_turn(
     reasoning_effort: str | None = None,
     *,
     hold: Hold | None = None,
+    hosted_tools: list[dict[str, Any]] | None = None,
 ) -> AsyncIterator[str]:
     """Like `run_turn`, but yields the answer text as the model writes it.
 
@@ -133,9 +143,12 @@ async def stream_turn(
 
     An outward tool call is passed to `hold` instead of being run; without
     `hold` it is refused. At most one step per turn is held.
+
+    `hosted_tools` are platform tools such as `{"type": "web_search"}`: the
+    model service runs them itself, so they never reach `_dispatch`.
     """
     by_name = {tool.name: tool for tool in tools}
-    schemas = [tool.schema() for tool in tools]
+    schemas = [tool.schema() for tool in tools] + list(hosted_tools or [])
     past_calls: list[ToolCall] = []
     held: list[ToolCall] = []
     step = 0
@@ -195,7 +208,7 @@ async def stream_turn(
             # what follows a full stop before it speaks the sentence, and without
             # this the next character would only come after the tools have run.
             ends_with_space = True
-            yield " "
+            yield PAUSE
         for call in calls:
             items.append(_tool_output(call, await _dispatch(by_name, call, hold, held)))
         past_calls.extend(calls)

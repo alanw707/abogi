@@ -84,3 +84,96 @@ async def test_reasoning_effort_is_sent_only_when_set():
     client = FakeClient(text("ok"))
     await run_turn(client, "m", "be brief", [], [ECHO])
     assert "reasoning" not in client.requests[-1]
+
+
+class StreamingClient:
+    """Streams scripted responses as Responses API events, like the real client."""
+
+    def __init__(self, *script):
+        self.script = list(script)
+        self.requests = []
+        self.responses = self
+
+    async def create(self, **request):
+        self.requests.append(request)
+        response, deltas = self.script.pop(0)
+
+        async def events():
+            for delta in deltas:
+                yield SimpleNamespace(type="response.output_text.delta", delta=delta)
+            yield SimpleNamespace(type="response.completed", response=response)
+
+        return events()
+
+
+async def test_stream_turn_yields_text_as_it_arrives():
+    from abogi.core.loop import stream_turn
+
+    client = StreamingClient((text("Two meetings today."), ["Two ", "meetings ", "today."]))
+    chunks = [chunk async for chunk in stream_turn(client, "m", "be brief", [], [ECHO])]
+    assert chunks == ["Two ", "meetings ", "today."]
+    assert client.requests[0]["stream"] is True
+
+
+async def test_stream_turn_runs_tools_and_separates_each_steps_words():
+    from abogi.core.loop import stream_turn
+
+    preamble = SimpleNamespace(
+        output=[
+            Item(type="message", role="assistant", content="Let me check."),
+            Item(type="function_call", call_id="c1", name="echo", arguments="{\"word\": \"hi\"}"),
+        ],
+        output_text="Let me check.",
+    )
+    client = StreamingClient((preamble, ["Let me check."]), (text("It said hi."), ["It said hi."]))
+    items = []
+    chunks = [chunk async for chunk in stream_turn(client, "m", "be brief", items, [ECHO])]
+    assert chunks == ["Let me check.", " ", "It said hi."]  # the space comes before the tool runs
+    assert {"type": "function_call_output", "call_id": "c1", "output": "echo hi"} in items
+
+
+async def test_a_failed_model_stream_raises():
+    import pytest
+
+    from abogi.core.loop import stream_turn
+
+    class Failing(StreamingClient):
+        async def create(self, **request):
+            async def events():
+                yield SimpleNamespace(type="response.failed", response=SimpleNamespace(error="quota"))
+
+            return events()
+
+    with pytest.raises(RuntimeError, match="quota"):
+        [chunk async for chunk in stream_turn(Failing(), "m", "be brief", [], [])]
+
+
+async def test_each_tool_run_is_a_span(monkeypatch):
+    from abogi.core import loop
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(loop, "_tracer", provider.get_tracer("test"))  # a global provider is set once only
+
+    async def broken(arguments):
+        raise ValueError("no network")
+
+    tools = [ECHO, Tool("broken", "Fails.", {"type": "object", "properties": {}}, broken)]
+    client = FakeClient(
+        SimpleNamespace(
+            output=[
+                Item(type="function_call", call_id="c1", name="echo", arguments="{}"),
+                Item(type="function_call", call_id="c2", name="broken", arguments="{}"),
+            ],
+            output_text="",
+        ),
+        text("Done."),
+    )
+    await run_turn(client, "m", "be brief", [], tools)
+    spans = {span.name: span for span in exporter.get_finished_spans()}
+    assert spans["execute_tool echo"].attributes["gen_ai.tool.call.id"] == "c1"
+    assert spans["execute_tool broken"].status.status_code.name == "ERROR"

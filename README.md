@@ -2,7 +2,7 @@
 
 A voice-first personal chief of staff built on Microsoft Foundry. Abogi acts on its owner's behalf across mail, calendar, research and code, and speaks up when something needs attention.
 
-**Status:** step 1 works: a terminal question gets an answer from the owner's Google Calendar through the hosted agent, traced in Application Insights.
+**Status:** step 2 works: hold F9 on Windows (or turn on hands-free) and ask about your calendar; the hosted agent answers aloud through Voice Live, streaming its answer, and each turn, with its tool and Google calls, is traced in Application Insights.
 
 ## Shape
 
@@ -50,6 +50,16 @@ uv run abogi "what's on my calendar tomorrow?"                   # ask the local
 uv run abogi --agent abogi "what's on my calendar tomorrow?"     # ask the hosted agent
 uv run --env-file .env python scripts/deploy_agent.py <image>    # new hosted agent version
 ```
+
+### Voice (Windows tray, push-to-talk)
+
+Needs `uv` on Windows (`winget install astral-sh.uv`), `ABOGI_TENANT_ID` in `.env`, and `Cognitive Services User` plus `Foundry User` on the Foundry resource. From Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File <repo>\scripts\abogi-tray.ps1   # e.g. \\wsl.localhost\<distro>\home\<you>\projects\abogi
+```
+
+The first run prints a code to enter at microsoft.com/devicelogin to sign in to Azure; later runs are silent. Hold F9 (`ABOGI_VOICE_KEY`) and speak, release to send, press again to interrupt. The tray dot is grey idle, blue warming, red listening, amber thinking, green speaking, black offline. For hands-free, right-click the tray dot and tick "Hands-free listening" (or start with `ABOGI_VOICE_MODE=hands-free`): just talk, and F9 only stops Abogi mid-answer. While it is on, everything the microphone hears is streamed to Azure. Optional: `ABOGI_VOICE` (an Azure voice name) and `ABOGI_AGENT_NAME`.
 
 If Azure sign-in times out, an old `az` in `~/.local/bin` is shadowing `/usr/bin/az`; put `/usr/bin` first on `PATH`.
 

@@ -215,6 +215,30 @@ async def test_unreachable_server_is_skipped_by_load_tools(monkeypatch):
     assert await load_tools() == []
 
 
+async def test_load_tools_starts_prepare_in_the_background_and_logs_failures(monkeypatch, caplog):
+    import asyncio
+
+    import abogi.connectors as connectors
+
+    started = asyncio.Event()
+
+    class Prepared:
+        name, url = "calendar", "fake"
+
+        async def tools(self):
+            return []
+
+        async def prepare(self):
+            started.set()
+            raise RuntimeError("vault down")
+
+    monkeypatch.setattr(connectors, "build_calendar_connector", lambda env: Prepared())
+    assert await load_tools() == []  # returns without waiting for prepare
+    await asyncio.wait_for(started.wait(), 1)
+    await asyncio.sleep(0)
+    assert "Preparing connector calendar failed: RuntimeError: vault down" in caplog.text
+
+
 # --- configuration ---------------------------------------------------------
 
 

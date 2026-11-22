@@ -29,6 +29,8 @@ from typing import Any
 
 DEFAULT_LOCAL_URL = "http://localhost:8088"
 ENDPOINT_ENV = "ABOGI_PROJECT_ENDPOINT"
+# Until the hosted session's real idle timeout is confirmed, assume 15 minutes.
+WARM_IDLE_SECONDS = 15 * 60
 
 
 class Conversation:
@@ -94,6 +96,12 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     target.add_argument("--agent", metavar="NAME", help="use the Foundry hosted agent NAME")
     parser.add_argument("--url", default=DEFAULT_LOCAL_URL, help="local agent server URL")
     parser.add_argument("--model", help="model name to send, if the server wants one")
+    parser.add_argument(
+        "--warm",
+        action="store_true",
+        help="REPL only: send a warm-up turn first, so questions skip the session start",
+    )
+    parser.add_argument("--time", action="store_true", help="print how long each reply took")
     return parser.parse_args(argv)
 
 
@@ -104,12 +112,27 @@ def main(
     read: Callable[[str], str] = input,
     write: Callable[[str], None] = print,
 ) -> int:
+    import time
+
+    from abogi.channels.warm import WarmConversation
+
     args = parse_args(argv)
-    conversation = Conversation(client_factory(args), model=args.model)
+    conversation: Any = Conversation(client_factory(args), model=args.model)
+
+    def timed(label: str, action: Callable[[], Any]) -> Any:
+        started = time.perf_counter()
+        result = action()
+        if args.time:
+            write(f"({label}: {time.perf_counter() - started:.1f}s)")
+        return result
 
     if args.message:
-        write(conversation.ask(args.message))
+        write(timed("reply", lambda: conversation.ask(args.message)))
         return 0
+
+    if args.warm:
+        conversation = WarmConversation(conversation, idle_timeout=WARM_IDLE_SECONDS)
+        timed("warm-up", conversation.warm)
 
     while True:
         try:
@@ -120,7 +143,9 @@ def main(
         if text in {"exit", "quit"}:
             return 0
         if text:
-            write(conversation.ask(text))
+            if args.warm:
+                conversation.warm()  # only sends anything after a long idle
+            write(timed("reply", lambda: conversation.ask(text)))
 
 
 def cli() -> None:

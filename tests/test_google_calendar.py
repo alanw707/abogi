@@ -33,10 +33,14 @@ def run(connector, name, **arguments):
     return anyio.run(go)
 
 
-def test_only_read_tools_are_offered():
+def test_reading_is_free_and_every_change_is_outward():
     fetch, _ = fake_api()
-    names = [t.name for t in anyio.run(GoogleCalendarConnector(fetch).tools)]
-    assert names == ["list_calendars", "list_events", "get_event"]
+    tools = anyio.run(GoogleCalendarConnector(fetch).tools)
+    assert [t.name for t in tools if not t.outward] == ["list_calendars", "list_events", "get_event"]
+    assert [t.name for t in tools if t.outward] == [
+        "create_event", "move_event", "cancel_event", "respond_to_event"
+    ]
+    assert all(t.read_back for t in tools if t.outward)
 
 
 def test_a_day_is_bounded_in_the_calendars_time_zone():
@@ -96,3 +100,92 @@ def test_the_calendar_time_zone_is_looked_up_once():
     run(connector, "list_events", start_date="2026-11-20")
     lookups = [path for path, _ in calls if path.startswith("/users/me/calendarList/")]
     assert lookups == ["/users/me/calendarList/primary"]
+
+
+# --- changing events ----------------------------------------------------------
+
+
+EVENT = {
+    "id": "ev1",
+    "summary": "Dentist",
+    "start": {"dateTime": "2026-11-23T14:00:00-08:00"},
+    "end": {"dateTime": "2026-11-23T14:30:00-08:00"},
+    "attendees": [{"email": "me@example.com", "self": True, "responseStatus": "needsAction"},
+                  {"email": "sam@example.com"}],
+}
+
+
+def writable_api():
+    calls = []
+
+    async def fetch(path, params, *, method="GET", body=None):
+        calls.append((method, path, params, body))
+        if path.startswith("/users/me/calendarList/"):
+            return {"timeZone": "America/Los_Angeles"}
+        if method == "DELETE":
+            return {}
+        if method in ("POST", "PATCH"):
+            return {**EVENT, **(body or {}), "id": "ev1"}
+        return dict(EVENT, attendees=[dict(a) for a in EVENT["attendees"]])
+
+    return fetch, calls
+
+
+def tool(connector, name):
+    return {t.name: t for t in anyio.run(connector.tools)}[name]
+
+
+def test_create_reads_back_in_spoken_time_and_sends_local_times():
+    fetch, calls = writable_api()
+    create = tool(GoogleCalendarConnector(fetch), "create_event")
+    args = {"title": "Lunch", "start": "2026-11-24T12:00", "end": "2026-11-24T13:00", "guests": ["sam@example.com"]}
+    said = anyio.run(create.read_back, args)
+    assert said == 'Create "Lunch" on Tue 24 Nov, 12:00 PM to 1:00 PM and invite sam@example.com.'
+    assert all(method == "GET" for method, *_ in calls)  # reading back changes nothing
+
+    anyio.run(create.run, args)
+    method, path, params, body = calls[-1]
+    assert (method, path, params) == ("POST", "/calendars/primary/events", {"sendUpdates": "all"})
+    assert body["start"] == {"dateTime": "2026-11-24T12:00:00-08:00", "timeZone": "America/Los_Angeles"}
+    assert body["attendees"] == [{"email": "sam@example.com"}]
+
+
+def test_all_day_events_end_the_next_day():
+    fetch, calls = writable_api()
+    anyio.run(tool(GoogleCalendarConnector(fetch), "create_event").run,
+              {"title": "Off", "start": "2026-11-27", "end": "2026-11-27"})
+    body = calls[-1][3]
+    assert body["start"] == {"date": "2026-11-27"} and body["end"] == {"date": "2026-11-28"}
+
+
+def test_move_reads_back_the_event_by_name_and_tells_guests():
+    fetch, calls = writable_api()
+    move = tool(GoogleCalendarConnector(fetch), "move_event")
+    args = {"event_id": "ev1", "start": "2026-11-23T15:00", "end": "2026-11-23T15:30"}
+    said = anyio.run(move.read_back, args)
+    assert said == ('Move "Dentist" from on Mon 23 Nov, 2:00 PM to 2:30 PM to on Mon 23 Nov, '
+                    "3:00 PM to 3:30 PM, and tell its 1 guest.")
+    anyio.run(move.run, args)
+    assert calls[-1][:3] == ("PATCH", "/calendars/primary/events/ev1", {"sendUpdates": "all"})
+
+
+def test_cancel_deletes_and_tells_guests():
+    fetch, calls = writable_api()
+    result = anyio.run(tool(GoogleCalendarConnector(fetch), "cancel_event").run, {"event_id": "ev1"})
+    assert calls[-1][:3] == ("DELETE", "/calendars/primary/events/ev1", {"sendUpdates": "all"})
+    assert result.startswith("Cancelled: Mon 23 Nov 2:00 PM-2:30 PM: Dentist")
+
+
+def test_responding_changes_only_the_owners_answer():
+    fetch, calls = writable_api()
+    anyio.run(tool(GoogleCalendarConnector(fetch), "respond_to_event").run, {"event_id": "ev1", "response": "accepted"})
+    attendees = next(body for method, _, _, body in calls if method == "PATCH")["attendees"]
+    assert attendees[0]["responseStatus"] == "accepted"
+    assert "responseStatus" not in attendees[1]
+
+
+def test_an_end_before_the_start_is_refused():
+    fetch, _ = writable_api()
+    with pytest.raises(ValueError, match="after the start"):
+        anyio.run(tool(GoogleCalendarConnector(fetch), "create_event").run,
+                  {"title": "x", "start": "2026-11-24T13:00", "end": "2026-11-24T12:00"})

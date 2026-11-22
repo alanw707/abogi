@@ -11,7 +11,7 @@ A voice-first personal chief of staff built on Microsoft Foundry. Abogi acts on 
 - **Connectors**: MCP servers where a usable one exists, each set up with your own credentials. Google Calendar uses its REST API for now ([ADR 0003](docs/adr/0003-google-calendar-api-before-mcp.md)). Nothing personal lives in this repository.
 - **Channels**: a Windows tray voice client, and Discord when you are away.
 
-Abogi works inside a sandbox and asks before any outward step, such as sending a message or opening a pull request.
+Abogi works inside a sandbox. Any outward step, such as sending an email or moving a meeting, is held by the core and read back; it runs only when the owner says "Abogi, approve" ([ADR 0004](docs/adr/0004-approvals-enforced-in-code.md)).
 
 The project vocabulary is in [GLOSSARY.md](GLOSSARY.md).
 
@@ -39,12 +39,13 @@ One-time owner setup: `scripts/owner-setup.sh` walks through the Google OAuth cl
 | `ABOGI_TIMEZONE` | Owner's IANA time zone, such as `America/Los_Angeles` |
 | `ABOGI_CALENDAR_API=google` | Read Google Calendar directly (needs a Google sign-in) |
 | `ABOGI_GOOGLE_TOKEN_VAULT` | Key Vault URL holding the sign-in for the hosted agent |
+| `ABOGI_MAIL_API=google` | Read Gmail, write drafts, and send them after approval (same Google sign-in) |
 
 Common commands (WSL, repo root):
 
 ```bash
 uv run pytest -q                                                 # tests
-uv run --env-file .env python -m abogi.connectors.google_auth    # Google sign-in; renew weekly while in testing mode
+uv run --env-file .env python -m abogi.connectors.google_auth    # Google sign-in (calendar + Gmail); renew weekly in testing mode
 uv run --env-file .env python -m abogi.hosting.app               # agent server on :8088
 uv run abogi "what's on my calendar tomorrow?"                   # ask the local server
 uv run abogi --agent abogi "what's on my calendar tomorrow?"     # ask the hosted agent

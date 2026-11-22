@@ -31,7 +31,8 @@ from azure.ai.agentserver.responses import (
     TextResponse,
 )
 
-from abogi.core.loop import Tool, stream_turn
+from abogi.core.approvals import Approvals, is_approval
+from abogi.core.loop import Tool, ToolCall, run_tool, stream_turn
 from abogi.hosting import backend
 from abogi.hosting.instructions import INSTRUCTIONS, with_capabilities, with_model, with_now
 
@@ -99,6 +100,76 @@ def reuse_once_loaded(provider: ToolsProvider) -> ToolsProvider:
     return tools
 
 
+NOTHING_PENDING = (
+    "The owner said the approval phrase, but no step is waiting for approval "
+    "(it may have expired). Say so in one sentence and offer to set it up again."
+)
+APPROVED = "The owner approved that step and it has been run. Tell them the outcome in one sentence."
+DROPPED = (
+    'This turn did not approve the waiting step ("{read_back}"), so it was dropped. '
+    "If the owner still seems to want it (a plain yes, say), call its tool again so "
+    "it is held again, and ask for the approval phrase."
+)
+
+
+def latest_owner_text(items: list[dict[str, Any]]) -> str:
+    for item in reversed(items):
+        if item.get("role") == "user":
+            return str(item.get("content") or "")
+    return ""
+
+
+def approval_keys(context: Any, request: Any) -> tuple[str, str | None]:
+    """(where this turn holds a step, where it looks for the last turn's step).
+
+    A conversation id names the whole conversation (Voice Live sends one).
+    Otherwise turns are chained by `previous_response_id`, so a step is held
+    under this response's id and found by the next turn that follows it: an
+    approval counts only on the turn right after the read-back.
+    """
+    conversation = getattr(context, "conversation_id", None) or _field(request, "conversation")
+    if isinstance(conversation, Mapping):  # {"id": ...} form
+        conversation = conversation.get("id")
+    if isinstance(conversation, str) and conversation:
+        return f"conversation:{conversation}", f"conversation:{conversation}"
+    previous = _field(request, "previous_response_id")
+    return f"response:{context.response_id}", (f"response:{previous}" if previous else None)
+
+
+def _field(request: Any, name: str) -> Any:
+    """A request field, whether the request is a mapping or a model object."""
+    if isinstance(request, Mapping):
+        return request.get(name)
+    return getattr(request, name, None)
+
+
+async def settle_pending(
+    approvals: Approvals, key: str | None, items: list[dict[str, Any]], tools: list[Tool]
+) -> str | None:
+    """Run or drop the conversation's pending outward step (ADR 0004).
+
+    Called at the start of every turn. If this turn is an approval, the core
+    runs the held call and adds it, with its result, to the model input, so
+    the model only reports the outcome. Any other turn drops the step.
+
+    Returns a note for this turn's instructions, or None. (Foundry's Responses
+    endpoint rejects system and developer messages in the input, so a note
+    cannot go there.)
+    """
+    pending = approvals.take(key) if key else None
+    if not is_approval(latest_owner_text(items)):
+        return DROPPED.format(read_back=pending.read_back) if pending else None
+    if pending is None:
+        return NOTHING_PENDING
+    call: ToolCall = pending.call
+    output = await run_tool({tool.name: tool for tool in tools}, call)
+    items.append(
+        {"type": "function_call", "call_id": call.call_id, "name": call.name, "arguments": call.arguments}
+    )
+    items.append({"type": "function_call_output", "call_id": call.call_id, "output": output})
+    return APPROVED
+
+
 def create_app(
     *,
     client_factory: Callable[[], Any] = backend.make_client,
@@ -106,6 +177,7 @@ def create_app(
     tools_provider: ToolsProvider = default_tools_provider,
     instructions: str = INSTRUCTIONS,
     store: ResponseProviderProtocol | None = None,
+    approvals: Approvals | None = None,
 ) -> ResponsesAgentServerHost:
     """Build the server. Every argument has a production default; tests swap them."""
     app = ResponsesAgentServerHost(
@@ -113,6 +185,7 @@ def create_app(
         store=store,
     )
     client: Any = None  # created on first request so startup needs no credentials
+    approvals = approvals or Approvals()
 
     @app.response_handler
     async def handler(request: CreateResponse, context: ResponseContext, cancellation_signal: asyncio.Event):
@@ -123,12 +196,16 @@ def create_app(
         current = await context.get_input_items()
         items = build_input(history, current)
         tools = await tools_provider()
+        hold_key, last_key = approval_keys(context, request)
+        note = await settle_pending(approvals, last_key, items, tools)
         now = datetime.now(ZoneInfo(backend.owner_time_zone()))
         model_name = model or backend.model_name()
         turn_instructions = with_now(
             with_model(with_capabilities(instructions, [tool.name for tool in tools]), model_name),
             now,
         )
+        if note:
+            turn_instructions += f"\n\nAbout this turn: {note}"
         # Streamed, so Voice Live can start speaking on the first words.
         answer = stream_turn(
             client,
@@ -137,6 +214,7 @@ def create_app(
             items,
             tools,
             reasoning_effort=backend.reasoning_effort(),
+            hold=lambda call, read_back: approvals.hold(hold_key, call, read_back),
         )
         return TextResponse(context, request, text=answer)
 

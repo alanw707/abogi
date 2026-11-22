@@ -22,6 +22,7 @@ from azure.identity import DefaultAzureCredential
 
 PASSED_THROUGH = (
     "ABOGI_CALENDAR_API",
+    "ABOGI_MAIL_API",
     "ABOGI_TIMEZONE",
     "ABOGI_REASONING_EFFORT",
     "ABOGI_GOOGLE_TOKEN_VAULT",

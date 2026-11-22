@@ -25,6 +25,7 @@ import os
 from collections.abc import Awaitable, Callable
 
 from abogi.connectors.calendar import build_calendar_connector
+from abogi.connectors.github import build_github_connector
 from abogi.connectors.google_mail import build_mail_connector
 from abogi.connectors.mcp_connector import McpConnector
 from abogi.core.loop import Tool
@@ -42,7 +43,11 @@ def load_connectors() -> list[object]:
     providers cache the sign-in, so one instance each is shared)."""
     global _built
     if _built is None:
-        made = (build_calendar_connector(os.environ), build_mail_connector(os.environ))
+        made = (
+            build_calendar_connector(os.environ),
+            build_mail_connector(os.environ),
+            build_github_connector(os.environ),
+        )
         _built = [c for c in made if c is not None]
     return list(_built)
 

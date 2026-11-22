@@ -9,7 +9,8 @@ which ids it has spoken, so each alert is said once.
 What counts (the owner's urgency setting, from the environment):
 - a timed event starting within `ABOGI_ALERT_MINUTES` (default 10);
 - unread mail from anyone in `ABOGI_ALERT_FROM` (comma-separated addresses),
-  received in the last day.
+  received in the last day;
+- a failed CI run on the default branch of a repository in `ABOGI_GITHUB_REPOS`.
 """
 
 from __future__ import annotations
@@ -51,6 +52,8 @@ async def collect(connectors: list[Any], env: Mapping[str, str], now: datetime) 
             jobs.append(connector.upcoming_alerts(now, minutes))
         if senders and hasattr(connector, "mail_alerts"):
             jobs.append(connector.mail_alerts(senders))
+        if hasattr(connector, "upkeep_alerts"):
+            jobs.append(connector.upkeep_alerts())
     alerts: list[dict[str, str]] = []
     for result in await asyncio.gather(*jobs, return_exceptions=True):
         if isinstance(result, BaseException):

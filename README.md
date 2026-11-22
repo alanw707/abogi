@@ -2,7 +2,7 @@
 
 A voice-first personal chief of staff built on Microsoft Foundry. Abogi acts on its owner's behalf across mail, calendar, research and code, and speaks up when something needs attention.
 
-**Status:** step 2 works: hold F9 on Windows (or turn on hands-free) and ask about your calendar; the hosted agent answers aloud through Voice Live, streaming its answer, and each turn, with its tool and Google calls, is traced in Application Insights.
+**Status:** all eight steps are built. By voice (push-to-talk, hands-free or "Hey Jarvis") or Discord, Abogi reads and changes your calendar, triages and drafts mail, researches with cited reports, briefs you on a schedule, alerts you when something needs you, and looks after your GitHub repositories, handing issues to Copilot's coding agent for pull requests. Every outward step waits for "Abogi, approve".
 
 ## Shape
 
@@ -40,6 +40,8 @@ One-time owner setup: `scripts/owner-setup.sh` walks through the Google OAuth cl
 | `ABOGI_CALENDAR_API=google` | Read Google Calendar directly (needs a Google sign-in) |
 | `ABOGI_GOOGLE_TOKEN_VAULT` | Key Vault URL holding the sign-in for the hosted agent |
 | `ABOGI_MAIL_API=google` | Read Gmail, write drafts, and send them after approval (same Google sign-in) |
+| `ABOGI_GITHUB_REPOS` | Repositories Abogi looks after (`owner/name, ...`); token in `ABOGI_GITHUB_TOKEN` or Key Vault secret `github-token` |
+| `ABOGI_WEB_SEARCH=off` | Turn off web search and research |
 | `ABOGI_ALERT_MINUTES` | Alert when a meeting starts within this many minutes (default 10) |
 | `ABOGI_ALERT_FROM` | Comma-separated senders whose unread mail is an alert |
 

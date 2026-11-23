@@ -75,6 +75,23 @@ async def test_an_unanswered_follow_up_goes_back_to_sleep():
     assert session.state == IDLE and connection.names() == []
 
 
+async def test_a_noise_that_gets_no_reply_does_not_leave_it_thinking():
+    session, connection, _, clock = wake_session()
+    await answered(session, clock)
+    clock.now += 1.5
+    await session.handle(speech("started"))  # a cough in the follow-up window
+    await session.handle(speech("stopped"))
+    assert session.state == THINKING
+    clock.now += 5
+    await session.audio(b"quiet")
+    assert session.state == THINKING  # a real reply may still be starting
+    clock.now += 6
+    await session.audio(b"quiet")
+    assert session.state == IDLE and connection.names() == []
+    await session.wake()  # and the wake word still works
+    assert session.state == LISTENING
+
+
 def test_the_bar_says_how_to_send_and_interrupt_in_each_mode():
     from abogi.channels.tray import label
     from abogi.channels.voice import SPEAKING

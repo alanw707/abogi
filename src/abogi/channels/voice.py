@@ -146,6 +146,7 @@ class VoiceSession:
         self._heard_speech = False
         self._awake_timeout = awake_timeout
         self._preroll: deque[bytes] = deque(maxlen=10)  # ~0.5 s before the wake word fired
+        self._speaking_until = 0.0  # when the reply audio handed to the player ends
 
     # --- inputs from the client ----------------------------------------
 
@@ -222,6 +223,8 @@ class VoiceSession:
             if not self._awake:
                 self._preroll.append(pcm)
                 return
+            if self._clock() < self._awake_at:
+                return  # a follow-up window opens when the answer ends: this is Abogi talking
             if not self._heard_speech and self._clock() - self._awake_at > self._awake_timeout:
                 self._sleep()  # woken by mistake, or the owner changed their mind
                 if self.state == LISTENING:
@@ -290,7 +293,11 @@ class VoiceSession:
                 self._set(SPEAKING)
             if self.state == SPEAKING:
                 delta = event.delta
-                self._player.play(delta if isinstance(delta, bytes) else base64.b64decode(delta))
+                pcm = delta if isinstance(delta, bytes) else base64.b64decode(delta)
+                self._player.play(pcm)
+                # Audio arrives faster than it plays; track when the speaker falls silent.
+                start = max(self._speaking_until, self._clock())
+                self._speaking_until = start + len(pcm) / (2 * SAMPLE_RATE)
         elif kind == "response.audio_transcript.done" and response_id not in self._muted:
             self._on_text("abogi", getattr(event, "transcript", "") or "")
         elif kind == "conversation.item.input_audio_transcription.completed":
@@ -326,7 +333,20 @@ class VoiceSession:
         if response_id is None or response_id == self._active_id:
             self._active_id = None
             if self.state in (THINKING, SPEAKING):
-                self._set(IDLE)
+                if self.hands_free and self.wake_word:
+                    self._listen_for_follow_up()
+                else:
+                    self._set(IDLE)
+
+    def _listen_for_follow_up(self) -> None:
+        """A conversation, not one question: stay awake once the answer has played.
+
+        Streaming starts when the speaker falls silent (so Abogi does not hear
+        itself) and stops after `awake_timeout` if the owner says nothing.
+        """
+        self._awake, self._heard_speech = True, False
+        self._awake_at = max(self._clock(), self._speaking_until)
+        self._set(LISTENING)
 
     # --- helpers -----------------------------------------------------------
 

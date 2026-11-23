@@ -7,6 +7,8 @@ anywhere that can sign in to Azure (it calls the hosted agent like the CLI).
   or in a server channel when the owner tags the bot. Everyone else, and every
   other bot, is ignored, so the bot is safe to leave running. A reply in a
   server channel is visible to that server and pings no one.
+- An accepted message gets an eyes reaction at once, since the answer takes
+  the agent several seconds.
 - Each channel is one conversation, chained by `previous_response_id`, so
   approvals work as they do by voice: Abogi reads the step back, and typing
   "Abogi, approve" runs it (ADR 0004).
@@ -33,6 +35,7 @@ from abogi.skills.alerts import ALERT_CHECK
 logger = logging.getLogger("abogi.discord")
 
 LIMIT = 2000  # Discord's message length limit
+SEEN = "\N{EYES}"  # the reaction that says "received, working on it"
 
 
 def split_message(text: str, limit: int = LIMIT) -> list[str]:
@@ -143,6 +146,10 @@ def run(
         text = without_tag(message.content, client.user.id)
         if not text:
             return
+        try:  # seen at once; the answer takes the agent several seconds
+            await message.add_reaction(SEEN)
+        except Exception as error:  # noqa: BLE001 - a missing reaction must not stop the answer
+            logger.info("Could not react to the message: %s", type(error).__name__)
         async with message.channel.typing():
             try:
                 reply = await relay.answer(message.channel.id, text)

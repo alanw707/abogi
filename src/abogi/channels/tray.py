@@ -193,6 +193,47 @@ LABELS = {
 }
 
 
+def label(state: str, *, key: str = "F9", hands_free: bool = False, wake_phrase: str | None = None) -> str:
+    """The bar's text for `state`, in the words of the mode in use.
+
+    Push-to-talk sends when the key is released; hands-free and the wake word
+    send when the owner stops talking, so "release to send" would mislead.
+    """
+    if state == LISTENING and (hands_free or wake_phrase):
+        return "Listening… just talk; I send when you pause"
+    if state == SPEAKING and wake_phrase:
+        return f'Speaking — say "{wake_phrase}" or press {key} to interrupt'
+    if state == SPEAKING and hands_free:
+        return f"Speaking — talk or press {key} to interrupt"
+    if state == SPEAKING:
+        return f"Speaking — press {key} to interrupt"
+    return LABELS.get(state, state)
+
+
+def fell_asleep(previous: str, state: str, *, wake: bool) -> bool:
+    """With a wake word, idle means not listening: say so when a conversation ends.
+
+    That is a follow-up window running out, or an answer stopped with the key.
+    Start-up (warming to idle) is announced by the Ready text instead.
+    """
+    return wake and state == IDLE and previous in (LISTENING, THINKING, SPEAKING)
+
+
+def sleep_chime() -> bytes:
+    """Two soft falling notes (E5 to A4), the "I stopped listening" sound."""
+    import math
+    from array import array
+
+    samples = array("h")
+    for frequency in (659.0, 440.0):
+        count = int(SAMPLE_RATE * 0.13)
+        for i in range(count):
+            fade = min(1.0, i / 240, (count - i) / 240)  # 10 ms in and out: no clicks
+            value = 0.18 * fade * math.sin(2 * math.pi * frequency * i / SAMPLE_RATE)
+            samples.append(int(value * 32767))
+    return samples.tobytes()
+
+
 class Overlay:
     """A small always-on-top bar near the bottom of the screen showing the state.
 
@@ -295,6 +336,8 @@ class TrayClient:
         self._icon: Any = None
         self._overlay: Overlay | None = None
         self._announce_ready = False
+        self._state = IDLE  # the last state shown, to tell when a conversation ended
+        self._speaker: Speaker | None = None
         self._hands_free = hands_free and not wake_word
         self._wake = wake_word  # hands-free connection, gated by the local wake word
         self._detector: Any = None
@@ -377,10 +420,23 @@ class TrayClient:
             asyncio.run_coroutine_threadsafe(make(session), self._loop)
 
     def _show(self, state: str, text: str | None = None, linger_ms: int | None = None) -> None:
+        previous, self._state = self._state, state
         if state == IDLE and text is None and self._announce_ready:
             self._announce_ready = False
             text, linger_ms = self._ready_text(), 4000
             logger.info(text)
+        elif text is None and fell_asleep(previous, state, wake=self._wake):
+            text, linger_ms = f'Not listening — say "{self._wake_word.phrase}"', 3000
+            logger.info("Stopped listening.")
+            if self._speaker is not None:
+                self._speaker.play(sleep_chime())
+        if text is None and state != IDLE:
+            text = label(
+                state,
+                key=self._key_name.upper(),
+                hands_free=self._hands_free,
+                wake_phrase=self._wake_word.phrase if self._wake else None,
+            )
         if self._icon is not None:
             self._icon.icon = icon_image(state)
             self._icon.title = f"Abogi: {state}"
@@ -529,7 +585,7 @@ class TrayClient:
 
         credential = sign_in(self._tenant_id)
         self._credential = credential
-        speaker = Speaker()
+        speaker = self._speaker = Speaker()
         if self._wake and not self._start_detector():
             self._wake = False  # fall back to push-to-talk
         microphone = open_microphone(self._hear)

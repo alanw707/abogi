@@ -40,5 +40,15 @@ Restart the tray. The menu shows "Wake word ("Hey Abboggy")", and the status
 reads `Ready — say "Hey Abboggy"`. A missing file is logged as
 "No wake word model at ..." and the tray stays usable with push-to-talk.
 
+## 3. Talking to it
+
+- Say the wake word, then your question; it is sent when you pause.
+- After each answer Abogi keeps listening for 8 seconds, so a follow-up needs
+  no wake word. Listening starts once the answer has finished playing, so
+  Abogi does not hear itself.
+- When it stops listening, two soft falling notes play and the bar shows
+  `Not listening — say "Hey Abboggy"`.
+- To interrupt an answer, press F9 or say the wake word again.
+
 The approval phrase is unchanged: say "Abogi, approve" (only "approve" at the
 end of a short phrase counts, so the name may be heard any way).

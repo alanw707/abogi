@@ -2,7 +2,7 @@
 
 import pytest
 
-from abogi.channels.voice import IDLE, LISTENING, VoiceSession
+from abogi.channels.voice import IDLE, LISTENING, THINKING, VoiceSession
 
 from test_voice import Clock, FakeConnection, FakePlayer, audio, created, done, warmed, speech
 
@@ -35,7 +35,74 @@ async def test_waking_sends_the_last_moment_then_streams_until_the_turn_ends():
     await session.handle(created("r1"))
     await session.handle(audio("r1", b"ok"))
     await session.handle(done("r1"))
-    assert bytes(player.played) == b"ok" and session.state == IDLE
+    assert bytes(player.played) == b"ok"
+
+
+ONE_SECOND = b"\x00\x00" * 24000  # pcm16 at 24 kHz
+
+
+async def answered(session, clock, reply=ONE_SECOND):
+    """Wake, ask one question, and get a reply of `reply`'s length."""
+    await warmed(session, clock)
+    await session.wake()
+    await session.handle(speech("started"))
+    await session.handle(speech("stopped"))
+    await session.handle(created("r1"))
+    await session.handle(audio("r1", reply))
+    await session.handle(done("r1"))
+    session._connection.sent.clear()
+
+
+async def test_after_an_answer_a_follow_up_needs_no_wake_word():
+    session, connection, _, clock = wake_session()
+    await answered(session, clock)
+    assert session.state == LISTENING
+    await session.audio(b"abogi's own voice")  # the answer is still playing
+    assert connection.names() == []
+    clock.now += 1.5
+    await session.audio(b"and tomorrow?")
+    assert connection.names() == ["append"]
+    await session.handle(speech("started"))
+    await session.handle(speech("stopped"))
+    assert session.state == THINKING
+
+
+async def test_an_unanswered_follow_up_goes_back_to_sleep():
+    session, connection, _, clock = wake_session()
+    await answered(session, clock)
+    clock.now += 1 + 9  # the answer, then more than the follow-up window
+    await session.audio(b"room talk")
+    assert session.state == IDLE and connection.names() == []
+
+
+def test_the_bar_says_how_to_send_and_interrupt_in_each_mode():
+    from abogi.channels.tray import label
+    from abogi.channels.voice import SPEAKING
+
+    assert label(LISTENING) == "Listening… release to send"
+    assert "pause" in label(LISTENING, wake_phrase="Hey Abboggy")
+    assert label(SPEAKING, wake_phrase="Hey Abboggy") == 'Speaking — say "Hey Abboggy" or press F9 to interrupt'
+    assert label(SPEAKING, hands_free=True) == "Speaking — talk or press F9 to interrupt"
+
+
+def test_the_tray_says_when_it_stops_listening():
+    from abogi.channels.tray import fell_asleep
+    from abogi.channels.voice import SPEAKING, WARMING
+
+    assert fell_asleep(LISTENING, IDLE, wake=True)  # the follow-up window ran out
+    assert fell_asleep(SPEAKING, IDLE, wake=True)  # F9 stopped the answer
+    assert not fell_asleep(WARMING, IDLE, wake=True)  # start-up, not a conversation ending
+    assert not fell_asleep(IDLE, IDLE, wake=True)
+    assert not fell_asleep(LISTENING, IDLE, wake=False)  # push-to-talk: nothing was listening
+
+
+def test_the_sleep_chime_is_short_and_soft():
+    from abogi.channels.tray import sleep_chime
+    from abogi.channels.voice import SAMPLE_RATE
+
+    pcm = np.frombuffer(sleep_chime(), dtype=np.int16)
+    assert 0.2 < len(pcm) / SAMPLE_RATE < 0.5
+    assert np.abs(pcm).max() < 32767 * 0.3
 
 
 async def test_a_false_wake_goes_back_to_sleep():
@@ -119,6 +186,34 @@ def test_a_missing_custom_model_says_where_it_looked(tmp_path):
 
     with pytest.raises(FileNotFoundError, match="No wake word model"):
         load_model(str(tmp_path / "hey_abboggy.onnx"))
+
+
+def test_a_custom_model_on_a_fresh_install_downloads_the_shared_feature_models(tmp_path, monkeypatch):
+    import sys
+    import types
+
+    from abogi.channels.wake import load_model
+
+    custom = tmp_path / "hey_abboggy.onnx"
+    custom.write_bytes(b"onnx")
+    downloaded: list[list[str]] = []
+
+    class Model:
+        def __init__(self, wakeword_models, inference_framework):
+            # openWakeWord's melspectrogram and embedding models come with any download
+            if not downloaded:
+                raise RuntimeError("melspectrogram.onnx failed: File doesn't exist")
+            self.models = wakeword_models
+
+    package = types.ModuleType("openwakeword")
+    package.utils = types.SimpleNamespace(download_models=lambda model_names: downloaded.append(model_names))
+    model_module = types.ModuleType("openwakeword.model")
+    model_module.Model = Model
+    monkeypatch.setitem(sys.modules, "openwakeword", package)
+    monkeypatch.setitem(sys.modules, "openwakeword.model", model_module)
+
+    assert load_model(str(custom)).models == [str(custom)]
+    assert len(downloaded) == 1
 
 
 def test_downsampling_keeps_two_of_every_three_samples():

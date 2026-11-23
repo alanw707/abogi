@@ -138,20 +138,24 @@ def downsample_24k_to_16k(samples: Any) -> Any:
 
 
 def load_model(name: str) -> Any:
-    """openWakeWord's model for `name` (downloaded the first time), or a custom .onnx file."""
+    """openWakeWord's model for `name` (downloaded the first time), or a custom .onnx file.
+
+    Every model, custom ones too, runs on openWakeWord's shared melspectrogram and
+    embedding models, which a download fetches along with the named model.
+    """
     if name.lower().endswith(".onnx"):
         path = Path(name).expanduser()
         if not path.is_file():
             raise FileNotFoundError(f"No wake word model at {path}")
-        from openwakeword.model import Model
-
-        return Model(wakeword_models=[str(path)], inference_framework="onnx")
+        source, download = str(path), DEFAULT_MODEL  # any small model brings the shared ones
+    else:
+        source, download = name, name
     import openwakeword
     from openwakeword.model import Model
 
     try:
-        return Model(wakeword_models=[name], inference_framework="onnx")
+        return Model(wakeword_models=[source], inference_framework="onnx")
     except Exception:  # noqa: BLE001 - most likely not downloaded yet
-        logger.info("Downloading the %s wake word model (once).", name)
-        openwakeword.utils.download_models(model_names=[name])
-        return Model(wakeword_models=[name], inference_framework="onnx")
+        logger.info("Downloading openWakeWord's %s and feature models (once).", download)
+        openwakeword.utils.download_models(model_names=[download])
+        return Model(wakeword_models=[source], inference_framework="onnx")

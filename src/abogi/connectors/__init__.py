@@ -1,8 +1,8 @@
 """Connectors: access to external systems, offered to the loop as tools.
 
 `load_tools()` builds every connector configured in the environment and
-returns their tools: the calendar (see `calendar.py`) and Gmail
-(`google_mail.py`).
+returns their tools: the calendar (see `calendar.py`), Gmail
+(`google_mail.py`), GitHub (`github.py`) and Discord servers (`discord.py`).
 
 Lifetime: the returned tools hold no open connection. Each tool call opens
 its own short MCP session (see `mcp_connector.py`), so `load_tools()` can be
@@ -25,6 +25,7 @@ import os
 from collections.abc import Awaitable, Callable
 
 from abogi.connectors.calendar import build_calendar_connector
+from abogi.connectors.discord import build_discord_connector
 from abogi.connectors.github import build_github_connector
 from abogi.connectors.google_mail import build_mail_connector
 from abogi.connectors.mcp_connector import McpConnector
@@ -47,6 +48,7 @@ def load_connectors() -> list[object]:
             build_calendar_connector(os.environ),
             build_mail_connector(os.environ),
             build_github_connector(os.environ),
+            build_discord_connector(os.environ),
         )
         _built = [c for c in made if c is not None]
     return list(_built)

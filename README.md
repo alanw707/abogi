@@ -41,6 +41,7 @@ One-time owner setup: `scripts/owner-setup.sh` walks through the Google OAuth cl
 | `ABOGI_GOOGLE_TOKEN_VAULT` | Key Vault URL holding the sign-in for the hosted agent |
 | `ABOGI_MAIL_API=google` | Read Gmail, write drafts, and send them after approval (same Google sign-in) |
 | `ABOGI_GITHUB_REPOS` | Repositories Abogi looks after (`owner/name, ...`); token in `ABOGI_GITHUB_TOKEN` or Key Vault secret `github-token` |
+| `ABOGI_DISCORD_SERVERS` | Discord servers Abogi may read and manage (numeric ids, comma-separated); bot token in `ABOGI_DISCORD_TOKEN` or Key Vault secret `discord-token` |
 | `ABOGI_WEB_SEARCH=off` | Turn off web search and research |
 | `ABOGI_ALERT_MINUTES` | Alert when a meeting starts within this many minutes (default 10) |
 | `ABOGI_ALERT_FROM` | Comma-separated senders whose unread mail is an alert |
@@ -81,6 +82,14 @@ Abogi can tell you what your Claude Code and Codex sessions on your computer are
 ### Discord (when away)
 
 `scripts/abogi-discord.sh` (`uv run --extra discord --env-file .env python -m abogi.channels.discord`) answers direct messages from `ABOGI_DISCORD_OWNER_ID` only, using a bot token in `ABOGI_DISCORD_TOKEN` (enable the Message Content intent). Approvals work the same way: type "Abogi, approve". `ABOGI_DISCORD_ALERTS=on` also sends alerts; use it where the tray is not running.
+
+### Discord servers (read and manage)
+
+Separate from the direct-message channel above: with `ABOGI_DISCORD_SERVERS` set, Abogi can list a server's channels and read their latest messages by voice or DM. After "Abogi, approve" it can post, create, rename or delete a channel, and delete a message.
+
+- It acts as the bot, so each server decides what is allowed. Reading needs View Channels and Read Message History; posting needs Send Messages; channel changes need Manage Channels; deleting others' messages needs Manage Messages.
+- The hosted agent reads the bot token from Key Vault: `scripts/save-secret.sh discord` saves a new token to both places, and `scripts/save-secret.sh discord-vault` copies the one already in `.env`.
+- Posts never ping `@everyone` or a role.
 
 If Azure sign-in times out, an old `az` in `~/.local/bin` is shadowing `/usr/bin/az`; put `/usr/bin` first on `PATH`.
 

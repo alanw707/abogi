@@ -19,7 +19,6 @@ from azure.ai.projects.models import (
 )
 from azure.identity import DefaultAzureCredential
 
-
 PASSED_THROUGH = (
     "ABOGI_CALENDAR_API",
     "ABOGI_MAIL_API",

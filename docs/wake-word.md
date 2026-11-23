@@ -19,6 +19,10 @@ small model.
    - `hey ah buh jee` (closer to 아버지)
 3. Run all cells. When training finishes, download `hey_abboggy.onnx`.
 
+To train on this computer instead, keep the training files in a folder inside another
+folder (such as `D:\\abogi\\wakeword-train`), not directly on the drive: they run to about 25 GB,
+and a coding agent is not allowed to delete a top-level folder for you afterwards.
+
 openWakeWord's notes say a model trained in the quick notebook may be less
 accurate than one trained with more clips (its full pipeline,
 `notebooks/automatic_model_training.ipynb`, suggests 20,000+ examples). If it

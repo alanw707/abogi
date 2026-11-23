@@ -28,7 +28,7 @@ import re
 import sys
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path, PureWindowsPath
 from typing import Any
 
@@ -129,7 +129,7 @@ def read_session(path: Path) -> Session | None:
             said = text
     if not asked and not said:
         return None
-    active = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(timespec="minutes")
+    active = datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat(timespec="minutes")
     return Session(
         tool="Codex" if codex else "Claude",
         project=PureWindowsPath(cwd).name or "unknown folder",  # splits on / and \
@@ -192,7 +192,7 @@ def digest(sessions: list[Session], now: datetime, machine: str) -> str:
 
 def share(store: Any, env: Mapping[str, str] | None = None, now: datetime | None = None) -> int:
     """Read this computer's sessions and save the digest. Returns how many were shared."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     sessions = recent_sessions(session_dirs(env), now)
     store.set(SESSIONS, digest(sessions, now, platform.node()))
     return len(sessions)
@@ -245,7 +245,7 @@ def tools(store: Any) -> list[Tool]:
             raw = await asyncio.to_thread(store.get, SESSIONS)
         except Exception as error:  # noqa: BLE001
             return f"Coding sessions are unavailable ({type(error).__name__})."
-        return describe(raw, datetime.now(timezone.utc), str(arguments.get("project") or ""))
+        return describe(raw, datetime.now(UTC), str(arguments.get("project") or ""))
 
     return [
         Tool(
@@ -280,7 +280,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("clear", help="remove what was shared")
     args = parser.parse_args(argv)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if args.command == "preview":
         print(describe(digest(recent_sessions(session_dirs(), now), now, platform.node()), now))
     elif args.command == "share":

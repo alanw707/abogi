@@ -78,12 +78,22 @@ def with_model(instructions: str, model: str) -> str:
     )
 
 
-def with_capabilities(instructions: str, tool_names: list[str]) -> str:
-    """Tell the model what it can actually reach this turn, so it never claims more."""
-    if tool_names:
+def capability(name: str, description: str) -> str:
+    """One tool as a line for the model: its name and the first sentence of what it does."""
+    what = " ".join(description.split()).split(". ")[0].rstrip(".")
+    return f"{name}: {what}" if what else name
+
+
+def with_capabilities(instructions: str, tools: list[str]) -> str:
+    """Tell the model what it can actually reach this turn, so it never claims more or less.
+
+    `tools` are `capability()` lines (or bare names).
+    """
+    if tools:
         reach = (
-            "The only tools connected right now are: " + ", ".join(tool_names)
-            + ". These are internal names: never say these names aloud. "
+            "The only tools connected right now are these. Asked what you can do, cover all of them "
+            "in plain words:\n" + "\n".join(f"  - {tool}" for tool in tools)
+            + "\n- The words before each colon are internal names: never say these names aloud. "
             "You cannot reach anything else; say so if asked."
         )
     else:

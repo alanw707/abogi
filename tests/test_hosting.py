@@ -4,9 +4,8 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from starlette.testclient import TestClient
-
 from azure.ai.agentserver.responses import InMemoryResponseProvider
+from starlette.testclient import TestClient
 
 from abogi.core.loop import Tool
 from abogi.hosting import backend
@@ -254,8 +253,13 @@ def test_instructions_name_only_the_connected_tools():
 
     none = with_capabilities(INSTRUCTIONS, [])
     assert "no tools connected" in none
-    some = with_capabilities(INSTRUCTIONS, ["list_events", "get_event"])
-    assert "list_events, get_event" in some
+    from abogi.hosting.instructions import capability
+
+    line = capability("coding_sessions", "What the owner's sessions are doing: folder and title. Read-only.")
+    assert line == "coding_sessions: What the owner's sessions are doing: folder and title"
+    some = with_capabilities(INSTRUCTIONS, ["list_events", line])
+    assert "  - list_events\n  - coding_sessions: What the owner's sessions" in some
+    assert "cover all of them" in some
     assert "never say these names aloud" in some
     assert "no tools connected" not in some
     assert "Abogi, approve" in INSTRUCTIONS
@@ -321,3 +325,26 @@ def test_a_lead_in_is_its_own_message_before_the_tools_run():
         reply = client.post("/responses", json={"model": "x", "input": "Anything?"}).json()
     texts = [part["text"] for item in reply["output"] for part in item["content"]]
     assert texts == ["Let me check.", "Dentist at three."]
+
+
+async def test_every_built_in_tool_says_what_it_does():
+    """Abogi describes itself from these descriptions; a blank one hides an ability."""
+    from abogi.connectors.github import GitHubConnector
+    from abogi.connectors.google_calendar import GoogleCalendarConnector
+    from abogi.connectors.google_mail import GmailConnector
+    from abogi.profile import Memory
+    from abogi.skills.research import ResearchSkill
+
+    async def fetch(*args, **kwargs):
+        return {}
+
+    tools = [
+        *await GitHubConnector(fetch, ["owner/repo"]).tools(),
+        *await GoogleCalendarConnector(fetch).tools(),
+        *await GmailConnector(fetch, "America/Los_Angeles").tools(),
+        *Memory(store=None).tools(),
+        ResearchSkill(None, "m", None).tool(),
+    ]
+    assert len(tools) > 10
+    vague = [tool.name for tool in tools if len(tool.description.split()) < 5]
+    assert vague == []

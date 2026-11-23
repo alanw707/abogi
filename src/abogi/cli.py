@@ -145,7 +145,7 @@ def main(
         if text:
             if args.warm:
                 conversation.warm()  # only sends anything after a long idle
-            write(timed("reply", lambda: conversation.ask(text)))
+            write(timed("reply", lambda text=text: conversation.ask(text)))
 
 
 def cli() -> None:

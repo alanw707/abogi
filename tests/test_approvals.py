@@ -4,9 +4,8 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from starlette.testclient import TestClient
-
 from azure.ai.agentserver.responses import InMemoryResponseProvider
+from starlette.testclient import TestClient
 
 from abogi.core.approvals import Approvals, is_approval
 from abogi.core.loop import Tool, ToolCall, run_turn

@@ -1,10 +1,9 @@
 """Wake word: nothing streams until "Hey Jarvis", then one question streams."""
 
 import pytest
+from test_voice import Clock, FakeConnection, FakePlayer, audio, created, done, speech, warmed
 
 from abogi.channels.voice import IDLE, LISTENING, THINKING, VoiceSession
-
-from test_voice import Clock, FakeConnection, FakePlayer, audio, created, done, warmed, speech
 
 
 def wake_session():
@@ -238,3 +237,19 @@ def test_downsampling_keeps_two_of_every_three_samples():
 
     out = downsample_24k_to_16k(np.array([30, 60, 90, 300, 600, 900], dtype=np.int16))
     assert out.tolist() == [30, 75, 300, 750]
+
+
+def test_the_tray_keeps_its_log_in_a_file_without_a_line_per_request(tmp_path):
+    import logging
+
+    from abogi.channels.tray import log_to_file
+
+    root = logging.Logger("test-root")
+    log_to_file(root, tmp_path / "abogi" / "tray.log")
+    root.handle(logging.LogRecord("httpx", logging.INFO, "", 0, "HTTP Request: POST /responses", None, None))
+    root.handle(logging.LogRecord("httpx", logging.WARNING, "", 0, "request failed", None, None))
+    root.handle(logging.LogRecord("abogi", logging.INFO, "", 0, "Wake word heard (score 0.90).", None, None))
+    for handler in root.handlers:
+        handler.close()
+    text = (tmp_path / "abogi" / "tray.log").read_text()
+    assert "Wake word heard" in text and "request failed" in text and "HTTP Request" not in text

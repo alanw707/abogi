@@ -17,7 +17,6 @@ from azure.ai.agentserver.responses.streaming import ResponseEventStream
 
 from abogi.core.loop import Pause
 
-
 _CITATION = re.compile(r"\s*\(\[[^\]]*\]\([^)]*\)\)")  # " ([python.org](https://...))"
 _LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")  # "[python.org](https://...)" -> "python.org"
 _URL = re.compile(r"https?://\S+")

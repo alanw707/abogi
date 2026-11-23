@@ -2,13 +2,11 @@
 
 import json
 from datetime import datetime
-from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import anyio
-from starlette.testclient import TestClient
-
 from azure.ai.agentserver.responses import InMemoryResponseProvider
+from starlette.testclient import TestClient
 
 from abogi.connectors.google_calendar import GoogleCalendarConnector
 from abogi.connectors.google_mail import GmailConnector

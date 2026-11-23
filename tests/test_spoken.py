@@ -1,6 +1,5 @@
 """What reaches Voice Live: no links or URLs, split at pauses."""
 
-import pytest
 
 from abogi.core.loop import PAUSE
 from abogi.hosting.spoken import speakable, speakable_text

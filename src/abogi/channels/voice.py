@@ -22,9 +22,9 @@ The Windows wiring (microphone, speaker, hotkey, tray icon) is in `tray.py`.
 from __future__ import annotations
 
 import base64
-from collections import deque
 import logging
 import time
+from collections import deque
 from collections.abc import Callable
 from typing import Any, Protocol
 

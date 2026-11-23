@@ -70,6 +70,14 @@ The first run prints a code to enter at microsoft.com/devicelogin to sign in to 
 
 Abogi keeps a short profile of facts and preferences (added to every turn) and a history of the steps it ran after approval, as Key Vault secrets `abogi-profile` and `abogi-history` (or under `~/.config/abogi` without a vault), never in this repository. Edit the profile with `uv run --env-file .env python -m abogi.profile show|add|edit|history`. For Abogi to save "remember that..." and its history itself, the hosted agent's identity needs `Key Vault Secrets Officer` on that vault.
 
+### Coding sessions (read-only)
+
+Abogi can tell you what your Claude Code and Codex sessions on your computer are working on. The hosted agent cannot reach your computer, so your computer reports to it: with `ABOGI_SESSIONS=on` in `.env`, the tray saves a short digest every five minutes as the Key Vault secret `abogi-sessions`, and the agent reads it. The digest holds the 12 most recent sessions from the last two weeks: the tool, the folder name, the title, when it was last active, your last request and the last reply, each cut short, with anything shaped like a key or token removed. Abogi cannot start, steer or change a session.
+
+- See what would be shared, without sharing it: `uv run --env-file .env python -m abogi.sessions preview`
+- Share once by hand, see what Abogi can read, or remove it: `... python -m abogi.sessions share|show|clear`
+- Sessions kept elsewhere (such as the WSL home, from Windows): list the folders in `ABOGI_SESSION_DIRS`, separated by `;`.
+
 ### Discord (when away)
 
 `uv run --extra discord --env-file .env python -m abogi.channels.discord` answers direct messages from `ABOGI_DISCORD_OWNER_ID` only, using a bot token in `ABOGI_DISCORD_TOKEN` (enable the Message Content intent). Approvals work the same way: type "Abogi, approve". `ABOGI_DISCORD_ALERTS=on` also sends alerts; use it where the tray is not running.

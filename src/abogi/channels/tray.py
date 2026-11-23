@@ -316,6 +316,7 @@ class TrayClient:
         briefing_times: str = "",
         alert_every: float = 300.0,
         wake_model: str = "",
+        share_sessions: bool = False,
     ):
         from urllib.parse import urlsplit
 
@@ -323,6 +324,7 @@ class TrayClient:
         from abogi.channels.wake import wake_word as parse_wake_word
 
         self._wake_word = parse_wake_word(wake_model)
+        self._share_sessions = share_sessions  # tell Abogi what Claude and Codex are doing here
 
         parts = urlsplit(endpoint)
         self._resource = f"{parts.scheme}://{parts.netloc}"
@@ -463,6 +465,8 @@ class TrayClient:
         self._fresh_conversation = False
         last_turn: float | None = None
         delay = 1.0
+        if self._share_sessions:
+            self._sharing = asyncio.create_task(self._share(credential))  # kept so it is not collected
         while not self._stopping:
             if self._fresh_conversation:
                 conversation_id, last_turn = None, None  # new conversation, cold agent
@@ -520,6 +524,24 @@ class TrayClient:
             if not self._stopping:
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 30.0)
+
+    async def _share(self, credential: AsyncCredential, every: float = 300.0) -> None:
+        """Save a digest of this computer's coding sessions for the agent to read (abogi.sessions)."""
+        from abogi import sessions
+        from abogi.profile import build_store
+
+        store: Any = None
+        said = False
+        while True:
+            try:
+                store = store or build_store(credential=credential._credential)
+                count = await asyncio.to_thread(sessions.share, store)
+                if not said:
+                    logger.info("Sharing %d recent coding sessions with Abogi (read-only).", count)
+                    said = True
+            except Exception as error:  # noqa: BLE001 - voice must not depend on this
+                logger.warning("Could not share coding sessions: %s: %s", type(error).__name__, error)
+            await asyncio.sleep(every)
 
     async def _keep_warm(self, session: VoiceSession) -> None:
         while True:
@@ -669,6 +691,7 @@ def main() -> None:
         briefing_times=os.environ.get("ABOGI_BRIEFING_TIMES", ""),
         alert_every=_seconds(os.environ.get("ABOGI_ALERT_EVERY"), 300.0),
         wake_model=os.environ.get("ABOGI_WAKE_WORD", ""),
+        share_sessions=os.environ.get("ABOGI_SESSIONS", "").lower() == "on",
     ).run()
 
 

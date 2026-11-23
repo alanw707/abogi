@@ -36,6 +36,7 @@ SAMPLE_RATE = 24000  # pcm16 mono both ways, the Voice Live default
 DEFAULT_VOICE = "en-US-Ava:DragonHDLatestNeural"
 IDLE_TIMEOUT_SECONDS = 900  # hosted agent session default
 
+REPLY_TIMEOUT = 10.0  # seconds from the end of speech to the server starting a reply
 IDLE, WARMING, LISTENING, THINKING, SPEAKING = "idle", "warming", "listening", "thinking", "speaking"
 
 
@@ -146,7 +147,8 @@ class VoiceSession:
         self._heard_speech = False
         self._awake_timeout = awake_timeout
         self._preroll: deque[bytes] = deque(maxlen=10)  # ~0.5 s before the wake word fired
-        self._speaking_until = 0.0  # when the reply audio handed to the player ends
+        self._speaking_until = 0.0
+        self._stopped_at = 0.0  # when the server last heard speech end  # when the reply audio handed to the player ends
 
     # --- inputs from the client ----------------------------------------
 
@@ -219,6 +221,13 @@ class VoiceSession:
         # Hands-free streams all the time (the server hears speech start and
         # stop, including over Abogi's own answer); push-to-talk only while held.
         # With a wake word, hands-free streams only while awake.
+        if self.hands_free and self._awaiting_reply and self.state == THINKING:
+            if self._clock() - self._stopped_at > REPLY_TIMEOUT:
+                # The server heard a sound end but started no reply (a noise, not words).
+                logger.info("No reply started; back to waiting.")
+                self._awaiting_reply = False
+                self._sleep()
+                self._set(IDLE)
         if self.hands_free and self.wake_word:
             if not self._awake:
                 self._preroll.append(pcm)
@@ -272,6 +281,7 @@ class VoiceSession:
             if self.wake_word:
                 self._sleep()  # the question is in; say the wake word again to interrupt
             self._awaiting_reply = True  # create_response: the server asks the agent
+            self._stopped_at = self._clock()
             self._set(THINKING)
         elif kind == "response.created":
             self.conversation_id = getattr(response, "conversation_id", None) or self.conversation_id

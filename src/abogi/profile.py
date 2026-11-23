@@ -58,11 +58,11 @@ class FileStore:
 
 
 class VaultStore:
-    def __init__(self, vault_url: str) -> None:
+    def __init__(self, vault_url: str, credential: Any = None) -> None:
         from azure.identity import DefaultAzureCredential
         from azure.keyvault.secrets import SecretClient
 
-        self._client = SecretClient(vault_url=vault_url, credential=DefaultAzureCredential())
+        self._client = SecretClient(vault_url=vault_url, credential=credential or DefaultAzureCredential())
 
     def get(self, name: str) -> str | None:
         from azure.core.exceptions import ResourceNotFoundError
@@ -76,11 +76,12 @@ class VaultStore:
         self._client.set_secret(name, value, content_type="text/markdown")
 
 
-def build_store(env: Mapping[str, str] | None = None) -> Store:
+def build_store(env: Mapping[str, str] | None = None, credential: Any = None) -> Store:
+    """The vault when one is configured (signed in with `credential`, or the default), else files."""
     env = os.environ if env is None else env
     vault = (env.get("ABOGI_PROFILE_VAULT") or env.get("ABOGI_GOOGLE_TOKEN_VAULT") or "").strip()
     if vault:
-        return VaultStore(vault)
+        return VaultStore(vault, credential)
     return FileStore(Path(env.get("ABOGI_PROFILE_DIR") or Path.home() / ".config" / "abogi"))
 
 
@@ -154,7 +155,10 @@ class Memory:
         async def recent(arguments: dict[str, Any]) -> str:
             return await self.recent(int(arguments.get("limit") or 10))
 
+        from abogi import sessions
+
         return [
+            *sessions.tools(self._store),
             Tool(
                 "remember",
                 "Save a lasting fact or preference about the owner to their profile, when they ask "

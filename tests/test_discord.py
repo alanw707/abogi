@@ -3,7 +3,7 @@
 import json
 from types import SimpleNamespace
 
-from abogi.channels.discord import Relay, split_message
+from abogi.channels.discord import Relay, split_message, without_tag
 from abogi.channels.proactive import AlertQueue
 from abogi.skills.alerts import ALERT_CHECK
 
@@ -28,6 +28,17 @@ def test_only_the_owners_direct_messages_are_answered():
     assert not relay.accepts(7, is_dm=True, is_bot=False)  # someone else
     assert not relay.accepts(OWNER, is_dm=False, is_bot=False)  # in a server channel
     assert not relay.accepts(OWNER, is_dm=True, is_bot=True)
+
+
+def test_in_a_server_channel_only_the_owners_tag_is_answered():
+    relay = Relay(Agent([]), OWNER)
+    assert relay.accepts(OWNER, is_dm=False, is_bot=False, tagged=True)
+    assert not relay.accepts(OWNER, is_dm=False, is_bot=False, tagged=False)  # ordinary channel chatter
+    assert not relay.accepts(7, is_dm=False, is_bot=False, tagged=True)  # someone else tagging the bot
+    assert not relay.accepts(OWNER, is_dm=False, is_bot=True, tagged=True)  # another bot
+    assert without_tag("<@99> what is on today?", 99) == "what is on today?"
+    assert without_tag("<@!99> Abogi, approve", 99) == "Abogi, approve"
+    assert without_tag("ask <@7> instead", 99) == "ask <@7> instead"  # someone else's tag stays
 
 
 async def test_each_channel_is_one_conversation_so_approvals_follow_the_read_back():

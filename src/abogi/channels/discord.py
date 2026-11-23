@@ -1,11 +1,13 @@
-"""Discord: reach Abogi by direct message when away from the computer (step 4).
+"""Discord: reach Abogi by direct message, or by tagging it in a server channel (step 4).
 
 Run with `uv run --extra discord --env-file .env python -m abogi.channels.discord`
 anywhere that can sign in to Azure (it calls the hosted agent like the CLI).
 
-- Only direct messages from the owner (`ABOGI_DISCORD_OWNER_ID`) are answered;
-  everyone else is ignored, so the bot is safe to leave running.
-- Each DM channel is one conversation, chained by `previous_response_id`, so
+- Only the owner (`ABOGI_DISCORD_OWNER_ID`) is answered: in a direct message,
+  or in a server channel when the owner tags the bot. Everyone else, and every
+  other bot, is ignored, so the bot is safe to leave running. A reply in a
+  server channel is visible to that server and pings no one.
+- Each channel is one conversation, chained by `previous_response_id`, so
   approvals work as they do by voice: Abogi reads the step back, and typing
   "Abogi, approve" runs it (ADR 0004).
 - With `ABOGI_DISCORD_ALERTS=on` it also sends alerts (the same code-only
@@ -21,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -48,8 +51,13 @@ def split_message(text: str, limit: int = LIMIT) -> list[str]:
     return pieces
 
 
+def without_tag(text: str, bot_id: int) -> str:
+    """The message with the bot's own tag (`<@id>` or `<@!id>`) removed."""
+    return re.sub(rf"<@!?{bot_id}>", " ", text).strip()
+
+
 class Relay:
-    """The owner's DMs to the hosted agent and back, one conversation per channel.
+    """The owner's messages to the hosted agent and back, one conversation per channel.
 
     `agent` is an OpenAI-style client for the hosted agent (blocking); calls
     run in a thread so the Discord connection keeps its heartbeat.
@@ -61,8 +69,9 @@ class Relay:
         self._previous: dict[int, str] = {}  # channel id -> last response id
         self._locks: dict[int, asyncio.Lock] = {}
 
-    def accepts(self, author_id: int, is_dm: bool, is_bot: bool) -> bool:
-        return is_dm and not is_bot and author_id == self._owner_id
+    def accepts(self, author_id: int, is_dm: bool, is_bot: bool, tagged: bool = False) -> bool:
+        """The owner, in a direct message or tagging the bot in a server channel."""
+        return (is_dm or tagged) and not is_bot and author_id == self._owner_id
 
     async def answer(self, channel_id: int, text: str) -> str:
         lock = self._locks.setdefault(channel_id, asyncio.Lock())
@@ -121,23 +130,27 @@ def run(
 
     @client.event
     async def on_ready() -> None:
-        logger.info("Discord connected as %s; answering DMs from the owner only.", client.user)
+        logger.info("Discord connected as %s; answering the owner's DMs and tags only.", client.user)
         if alert_every:
             client.loop.create_task(send_alerts())
 
     @client.event
     async def on_message(message: Any) -> None:
         is_dm = isinstance(message.channel, discord.DMChannel)
-        if not relay.accepts(message.author.id, is_dm, message.author.bot):
+        tagged = client.user in message.mentions  # the bot itself, not @everyone or a role
+        if not relay.accepts(message.author.id, is_dm, message.author.bot, tagged):
+            return
+        text = without_tag(message.content, client.user.id)
+        if not text:
             return
         async with message.channel.typing():
             try:
-                reply = await relay.answer(message.channel.id, message.content)
+                reply = await relay.answer(message.channel.id, text)
             except Exception as error:  # noqa: BLE001 - tell the owner, keep the bot up
                 logger.warning("Agent call failed: %s: %s", type(error).__name__, error)
                 reply = f"I could not reach Abogi just now ({type(error).__name__})."
         for piece in split_message(reply):
-            await message.channel.send(piece)
+            await message.channel.send(piece, allowed_mentions=discord.AllowedMentions.none())
 
     client.run(token, log_handler=None)
 

@@ -329,6 +329,7 @@ def test_a_lead_in_is_its_own_message_before_the_tools_run():
 
 async def test_every_built_in_tool_says_what_it_does():
     """Abogi describes itself from these descriptions; a blank one hides an ability."""
+    from abogi.connectors.discord import DiscordConnector
     from abogi.connectors.github import GitHubConnector
     from abogi.connectors.google_calendar import GoogleCalendarConnector
     from abogi.connectors.google_mail import GmailConnector
@@ -340,6 +341,7 @@ async def test_every_built_in_tool_says_what_it_does():
 
     tools = [
         *await GitHubConnector(fetch, ["owner/repo"]).tools(),
+        *await DiscordConnector(fetch, ["1"]).tools(),
         *await GoogleCalendarConnector(fetch).tools(),
         *await GmailConnector(fetch, "America/Los_Angeles").tools(),
         *Memory(store=None).tools(),

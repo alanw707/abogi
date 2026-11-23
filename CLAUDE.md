@@ -13,6 +13,6 @@ Voice-first chief of staff on Microsoft Foundry. Start with [README.md](README.m
 
 - Deploy the hosted agent: `scripts/deploy.sh` (in WSL).
 - Voice tray (Windows): `scripts/abogi-tray.ps1`. Its log is `%LOCALAPPDATA%\abogi\tray.log`: search that file for what the tray did.
-- Discord bot: `scripts/abogi-discord.sh` (in WSL).
+- Discord bot: `scripts/abogi-discord.sh` (in WSL). On the owner's PC the "Abogi Discord" scheduled task keeps it running (`scripts/abogi-discord.ps1`); its log is `%LOCALAPPDATA%\abogi\discord.log`. To restart it, stop the bot process in WSL and the task starts it again.
 - Custom wake word: [docs/wake-word.md](docs/wake-word.md).
 - What Abogi may say about itself: `src/abogi/hosting/instructions.py`. A tool's description is how Abogi learns it has that ability.

@@ -81,7 +81,7 @@ Abogi can tell you what your Claude Code and Codex sessions on your computer are
 
 ### Discord (when away)
 
-`scripts/abogi-discord.sh` (`uv run --extra discord --env-file .env python -m abogi.channels.discord`) answers direct messages from `ABOGI_DISCORD_OWNER_ID` only, using a bot token in `ABOGI_DISCORD_TOKEN` (enable the Message Content intent). Approvals work the same way: type "Abogi, approve". `ABOGI_DISCORD_ALERTS=on` also sends alerts; use it where the tray is not running.
+`scripts/abogi-discord.sh` (`uv run --extra discord --env-file .env python -m abogi.channels.discord`) answers `ABOGI_DISCORD_OWNER_ID` only, in a direct message or when that account tags the bot in a server channel (the reply is visible to that server), using a bot token in `ABOGI_DISCORD_TOKEN` (enable the Message Content intent). Approvals work the same way: type "Abogi, approve" (with the tag, in a server channel). `ABOGI_DISCORD_ALERTS=on` also sends alerts; use it where the tray is not running.
 
 To keep it running on a Windows PC that stays on, run `powershell -ExecutionPolicy Bypass -File scripts\abogi-discord.ps1 -Install` once. That adds a scheduled task, "Abogi Discord", which starts the bot at every sign-in, restarts it 30 seconds after it stops, and logs to `%LOCALAPPDATA%\abogi\discord.log`. `-Remove` undoes it. Run one copy only: two bots would both answer.
 

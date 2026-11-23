@@ -676,10 +676,35 @@ class TrayClient:
             speaker.close()
 
 
+LOG_FILE = STATE_DIR / "tray.log"
+
+
+def routine_request(record: logging.LogRecord) -> bool:
+    """True for httpx's line per request: the alert check makes one every few minutes."""
+    return record.name.startswith("httpx") and record.levelno < logging.WARNING
+
+
+def log_to_file(root: logging.Logger, path: Path | None = None) -> None:
+    """Also keep the log in a file (1 MB, three old copies), so it can be searched.
+
+    Routine request lines are dropped from the screen and the file. A filter,
+    not a logger level: a client library resets the httpx logger's level.
+    """
+    from logging.handlers import RotatingFileHandler
+
+    path = path or LOG_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    keep = RotatingFileHandler(path, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+    keep.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+    root.addHandler(keep)
+    for handler in root.handlers:
+        handler.addFilter(lambda record: not routine_request(record))
+
+
 def main() -> None:
     logging.basicConfig(level=os.environ.get("ABOGI_LOG_LEVEL", "INFO"), format="%(asctime)s %(message)s")
     logging.getLogger("azure").setLevel(logging.WARNING)
-    logging.getLogger("httpx").setLevel(logging.WARNING)  # alert checks would log every request
+    log_to_file(logging.getLogger())
     TrayClient(
         endpoint=os.environ["ABOGI_PROJECT_ENDPOINT"],
         agent=os.environ.get("ABOGI_AGENT_NAME", "abogi"),

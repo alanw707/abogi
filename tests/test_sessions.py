@@ -2,11 +2,11 @@
 
 import json
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from abogi import sessions
 
-NOW = datetime(2026, 11, 22, 18, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 11, 22, 18, 0, tzinfo=UTC)
 
 
 def write(path, records, minutes_ago=5):

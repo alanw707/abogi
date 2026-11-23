@@ -149,10 +149,11 @@ async def test_a_failed_model_stream_raises():
 
 
 async def test_each_tool_run_is_a_span(monkeypatch):
-    from abogi.core import loop
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    from abogi.core import loop
 
     exporter = InMemorySpanExporter()
     provider = TracerProvider()

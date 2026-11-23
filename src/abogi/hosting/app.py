@@ -34,11 +34,11 @@ from azure.ai.agentserver.responses import (
 from abogi.core.approvals import Approvals, is_approval
 from abogi.core.loop import Tool, ToolCall, run_tool, stream_turn
 from abogi.hosting import backend
-from abogi.skills import alerts as alert_skill
-from abogi.skills import research as research_skill
+from abogi.hosting.instructions import INSTRUCTIONS, capability, with_capabilities, with_model, with_now
 from abogi.hosting.spoken import SpokenResponse, speakable
 from abogi.profile import with_profile
-from abogi.hosting.instructions import INSTRUCTIONS, with_capabilities, with_model, with_now
+from abogi.skills import alerts as alert_skill
+from abogi.skills import research as research_skill
 
 logger = logging.getLogger(__name__)
 
@@ -245,7 +245,7 @@ def create_app(
         note = await settle_pending(approvals, last_key, items, tools, mind)
         now = datetime.now(ZoneInfo(backend.owner_time_zone()))
         turn_instructions = with_now(
-            with_model(with_capabilities(instructions, [tool.name for tool in tools]), model_name),
+            with_model(with_capabilities(instructions, [capability(tool.name, tool.description) for tool in tools]), model_name),
             now,
         )
         if mind is not None:

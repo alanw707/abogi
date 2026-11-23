@@ -53,7 +53,7 @@ uv run --env-file .env python -m abogi.connectors.google_auth    # Google sign-i
 uv run --env-file .env python -m abogi.hosting.app               # agent server on :8088
 uv run abogi "what's on my calendar tomorrow?"                   # ask the local server
 uv run abogi --agent abogi "what's on my calendar tomorrow?"     # ask the hosted agent
-uv run --env-file .env python scripts/deploy_agent.py <image>    # new hosted agent version
+scripts/deploy.sh                                                # build, push and deploy a new hosted agent version
 ```
 
 ### Voice (Windows tray, push-to-talk)
@@ -80,7 +80,7 @@ Abogi can tell you what your Claude Code and Codex sessions on your computer are
 
 ### Discord (when away)
 
-`uv run --extra discord --env-file .env python -m abogi.channels.discord` answers direct messages from `ABOGI_DISCORD_OWNER_ID` only, using a bot token in `ABOGI_DISCORD_TOKEN` (enable the Message Content intent). Approvals work the same way: type "Abogi, approve". `ABOGI_DISCORD_ALERTS=on` also sends alerts; use it where the tray is not running.
+`scripts/abogi-discord.sh` (`uv run --extra discord --env-file .env python -m abogi.channels.discord`) answers direct messages from `ABOGI_DISCORD_OWNER_ID` only, using a bot token in `ABOGI_DISCORD_TOKEN` (enable the Message Content intent). Approvals work the same way: type "Abogi, approve". `ABOGI_DISCORD_ALERTS=on` also sends alerts; use it where the tray is not running.
 
 If Azure sign-in times out, an old `az` in `~/.local/bin` is shadowing `/usr/bin/az`; put `/usr/bin` first on `PATH`.
 

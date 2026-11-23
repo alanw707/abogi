@@ -336,7 +336,6 @@ async def test_bearer_token_is_sent_on_each_request():
 import json as _json
 
 import anyio
-
 import pytest as _pytest
 
 from abogi.connectors import google_auth as _google_auth

@@ -46,6 +46,7 @@ dev = [
     "numpy>=2.5.5",
     "pytest>=8",
     "pytest-asyncio>=0.24",
+    "ruff>=0.17.6",
 ]
 
 [build-system]
@@ -59,3 +60,14 @@ packages = ["src/abogi"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]  # a few long lines are fine; nothing formats this code
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402", "B904"]  # tests import beside the fakes they need

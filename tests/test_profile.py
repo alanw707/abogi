@@ -5,9 +5,8 @@ from datetime import datetime
 from types import SimpleNamespace
 
 import anyio
-from starlette.testclient import TestClient
-
 from azure.ai.agentserver.responses import InMemoryResponseProvider
+from starlette.testclient import TestClient
 
 from abogi.core.loop import Tool
 from abogi.hosting.app import create_app
